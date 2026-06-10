@@ -1,0 +1,13 @@
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 1
+names: ['blade']
+
+roboflow:
+  workspace: ahs-workspace-2qhtk
+  project: my-first-project-gg3o7
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/ahs-workspace-2qhtk/my-first-project-gg3o7/dataset/1
