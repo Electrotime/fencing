@@ -79,7 +79,7 @@ def compute_tip_velocity(
 
 if __name__ == "__main__":
     WEIGHTS = Path(__file__).resolve().parent.parent / "models" / "blade_yolo" / \
-              "fencing_blade_v1" / "weights" / "best.pt"
+              "fencing_blade_v2" / "weights" / "best.pt"
 
     traj: list[tuple[float, float] | None] = [(10.0, 20.0), (12.0, 22.0), None, (15.0, 25.0)]
     vel = compute_tip_velocity(traj)

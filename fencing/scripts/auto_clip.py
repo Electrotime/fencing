@@ -183,7 +183,7 @@ def main() -> None:
 
     kp, fps = extract_raw_kp(VIDEO, MAX_FRAMES)
     print(f"\nPerson detected in {100 * np.mean(kp[:, HIP_L, 3] > 0.3):.0f}% of frames")
-
+    
     windows = detect_actions(kp)
     print("\nDetected candidates:")
     for action in ACTIONS:

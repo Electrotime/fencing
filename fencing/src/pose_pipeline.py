@@ -150,7 +150,7 @@ if __name__ == "__main__":
     if not samples:
         print("No sample frames found -- skipping Tests 2 & 3")
         sys.exit(0)
-
+    
     sample_img = cv2.imread(str(samples[0]))
     kp = extract_keypoints_from_frame(sample_img)
     assert kp.shape == (N_LANDMARKS, 4)
