@@ -1,0 +1,26 @@
+# ── OS / editor junk ──────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+
+# ── Python ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ── ML training run outputs ───────────────────────
+# Canonical trained models live in fencing/models/blade_yolo/.
+# Everything under runs/ is intermediate/regeneratable.
+runs/
+
+# ── Auto-downloaded / regeneratable model files ───
+# Base YOLO weights (re-downloaded by ultralytics on demand)
+yolo11n.pt
+yolov8n.pt
+# MediaPipe pose model (re-downloaded by download_pose_model())
+*.task
+
+# ── Large raw footage (kept in OneDrive / locally, not in git) ──
+fencing/data/raw_video/*.mp4
