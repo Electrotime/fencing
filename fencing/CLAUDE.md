@@ -485,7 +485,21 @@ This video is the thing that goes in the portfolio and GitHub README. Everything
 
 ## Current status
 
-**Starting from scratch.** No code exists yet. Begin with Phase 0 (environment setup and project scaffolding).
+**Updated 2026-07-05 — Phases 0–3 complete. Phase 4 (action recognition) is next, blocked on clip collection.**
+
+- Phase 0 ✓ — environment verified on Python 3.14 (`scripts/smoke_test.py`)
+- Phase 1 ✓ — `scripts/extract_blade_frames.py`; 400 frames extracted and labeled in Roboflow
+- Phase 2 ✓ — `src/pose_pipeline.py` (Tasks API), `src/person_detector.py`, `scripts/process_clips.py`
+- Phase 3 ✓ — blade detector trained (YOLO11n): `models/blade_yolo/fencing_blade_v2/weights/best.pt`,
+  val metrics P 0.79 / R 0.74 / mAP50 0.74; loaded by `src/blade_detector.py`
+- Extra: `scripts/auto_clip.py` — experimental heuristic that proposes action-clip windows from a
+  raw match video (pass the video path as an argument); review its output manually and move
+  keepers into `data/clips/<action>/`
+- Raw match footage is gitignored and lives locally/OneDrive, not in the repo
+
+**Blocking Phase 4:** the action-clip dataset. `data/clips/` has 1 clip and `data/keypoints/` is
+empty. Collect clips per class (single fencer per clip!), run `scripts/process_clips.py`, then
+implement `src/action_model.py`.
 
 When the user says something like "let's start" or "let's do Phase X", begin by:
 1. Stating which phase you're working on

@@ -1,11 +1,12 @@
-"""Experimental auto-detection and clip cutting for action classes.
+"""Experiment: auto-find action clips in a match video.
 
-Runs MediaPipe on a raw video, detects advance/retreat/lunge/parry windows from
-keypoint velocities, and saves clips to data/clips/auto_test/<action>/.
+Runs pose estimation over a raw video, looks for advance/retreat/lunge/parry
+patterns in how the hips and wrists move, and cuts candidate clips into
+data/clips/auto_test/<action>/. The clips are guesses. Watch them and move
+the good ones into data/clips/<action>/.
 
-Review the output and move good clips to data/clips/<action>/.
-
-Run from project root:  python scripts/auto_clip.py
+Run from project root:  python scripts/auto_clip.py [path/to/video.mp4]
+(no argument = the Errigo vs Favaretto video)
 """
 
 from __future__ import annotations
@@ -24,16 +25,17 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.pose_pipeline import _landmarks_to_array, _make_landmarker, download_pose_model
 
-VIDEO = (
+DEFAULT_VIDEO = (
     PROJECT_ROOT / "data" / "raw_video"
     / "2025 122 SWF Coupe du Monde, Vancouver ERRIGO Arianna vs FAVARETTO Martina_720p_deinterlaced.mp4"
 )
 AUTO_TEST_DIR = PROJECT_ROOT / "data" / "clips" / "auto_test"
 
-MAX_FRAMES = 3000
-CLIPS_PER_CLASS = 2
-CLIP_PAD = 8
+MAX_FRAMES = 3000    # only scan the start of the video, keeps the run short
+CLIPS_PER_CLASS = 2  # keep the best few candidates per action
+CLIP_PAD = 8         # extra frames on both ends so clips don't start mid-motion
 
+# thresholds tuned by eyeballing velocity plots from the Errigo/Favaretto video
 HIP_VEL_THRESH = 0.0025
 LUNGE_WRIST_THRESH = 0.012
 PARRY_WRIST_THRESH = 0.006
@@ -51,6 +53,7 @@ ACTIONS = ["advance", "retreat", "lunge", "parry"]
 
 
 def moving_avg(arr: np.ndarray, w: int) -> np.ndarray:
+    """Simple moving average, works on 1D or (n, k) arrays."""
     if w <= 1:
         return arr.copy()
     kernel = np.ones(w) / w
@@ -60,12 +63,13 @@ def moving_avg(arr: np.ndarray, w: int) -> np.ndarray:
 
 
 def first_diff(arr: np.ndarray) -> np.ndarray:
+    """Frame-to-frame change, front-padded with zeros so the length stays the same."""
     d = np.diff(arr, axis=0)
     return np.concatenate([np.zeros_like(arr[:1]), d], axis=0)
 
 
 def find_windows(mask: np.ndarray, min_len: int, merge_gap: int) -> list[tuple[int, int]]:
-    """Find contiguous True regions, merge nearby ones, filter by min length."""
+    """Contiguous stretches of True, with nearby ones merged and short ones dropped."""
     if not np.any(mask):
         return []
     padded = np.concatenate([[False], mask, [False]])
@@ -84,7 +88,7 @@ def find_windows(mask: np.ndarray, min_len: int, merge_gap: int) -> list[tuple[i
 
 
 def top_windows(windows: list[tuple[int, int]], score: np.ndarray, n: int) -> list[tuple[int, int]]:
-    """Return up to n highest-scoring non-overlapping windows."""
+    """Up to n best-scoring windows that don't overlap each other."""
     scored = sorted(
         [(float(np.mean(np.abs(score[s:e + 1]))), s, e) for s, e in windows],
         reverse=True,
@@ -99,10 +103,14 @@ def top_windows(windows: list[tuple[int, int]], score: np.ndarray, n: int) -> li
 
 
 def extract_raw_kp(video_path: Path, max_frames: int) -> tuple[np.ndarray, float]:
-    """Extract raw (un-normalized) MediaPipe keypoints from the first max_frames frames."""
+    """Raw (un-normalized) keypoints for the first max_frames frames of the video."""
     download_pose_model()
     cap = cv2.VideoCapture(str(video_path))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    if not cap.isOpened():
+        sys.exit(f"couldn't open {video_path}, is the path right?")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not np.isfinite(fps) or fps <= 0:
+        fps = 30.0
     total = min(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), max_frames)
     rows: list[np.ndarray] = []
 
@@ -119,12 +127,15 @@ def extract_raw_kp(video_path: Path, max_frames: int) -> tuple[np.ndarray, float
                 bar.update(1)
 
     cap.release()
+    if not rows:
+        sys.exit(f"read zero frames from {video_path.name}, something's wrong with the file")
     return np.stack(rows), fps
 
 
 def detect_actions(kp: np.ndarray) -> dict[str, list[tuple[int, int]]]:
     detected = kp[:, HIP_L, 3] > 0.3
 
+    # track where the hips are and how fast each wrist is moving
     hip_x = (kp[:, HIP_L, 0] + kp[:, HIP_R, 0]) / 2.0
     wl_s = moving_avg(kp[:, WRIST_L, :2], SMOOTH_W)
     wr_s = moving_avg(kp[:, WRIST_R, :2], SMOOTH_W)
@@ -138,13 +149,18 @@ def detect_actions(kp: np.ndarray) -> dict[str, list[tuple[int, int]]]:
     hip_vel_x[~detected] = 0.0
     wrist_speed[~detected] = 0.0
 
+    # which side of the frame the fencer lives on decides what "forward" means
     facing_right = moving_avg(hip_x_s, 30) < 0.5
-    lunge_suppression = np.clip(1.0 - wrist_speed / LUNGE_WRIST_THRESH, 0.0, 1.0)
     advance_raw = np.where(facing_right, hip_vel_x, -hip_vel_x)
 
-    advance_score = advance_raw * lunge_suppression
-    retreat_score = -advance_raw * lunge_suppression
+    # a flying wrist usually means a lunge, so damp advance/retreat scores there
+    not_lunging = np.clip(1.0 - wrist_speed / LUNGE_WRIST_THRESH, 0.0, 1.0)
+    advance_score = advance_raw * not_lunging
+    retreat_score = -advance_raw * not_lunging
+
     lunge_score = np.where(wrist_speed >= LUNGE_WRIST_THRESH, wrist_speed, 0.0)
+
+    # parry = wrist moving while the hips stay put
     stillness = np.clip(1.0 - np.abs(hip_vel_x) / HIP_STILL_THRESH, 0.0, 1.0)
     parry_score = np.where(wrist_speed >= PARRY_WRIST_THRESH, wrist_speed * stillness, 0.0)
 
@@ -162,6 +178,7 @@ def detect_actions(kp: np.ndarray) -> dict[str, list[tuple[int, int]]]:
 
 
 def save_clip(video_path: Path, start_frame: int, end_frame: int, fps: float, output_path: Path) -> None:
+    """Cut [start, end] out of the video with ffmpeg (re-encoded so the cut lands on the frame)."""
     cmd = [
         "ffmpeg", "-y",
         "-ss", f"{start_frame / fps:.4f}",
@@ -170,27 +187,36 @@ def save_clip(video_path: Path, start_frame: int, end_frame: int, fps: float, ou
         "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-an",
         str(output_path),
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except FileNotFoundError:
+        sys.exit("ffmpeg isn't installed or isn't on PATH. Get it and rerun "
+                 "(on Windows: winget install Gyan.FFmpeg)")
+    except subprocess.CalledProcessError as e:
+        tail = e.stderr.decode(errors="replace")[-500:]
+        sys.exit(f"ffmpeg died while cutting {output_path.name}:\n{tail}")
 
 
 def main() -> None:
-    if not VIDEO.exists():
-        print(f"Video not found: {VIDEO}")
+    video = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_VIDEO
+    if not video.exists():
+        print(f"video not found: {video}")
+        print("usage: python scripts/auto_clip.py [path/to/video.mp4]")
         sys.exit(1)
 
-    print(f"Video: {VIDEO.name}")
-    print(f"Analysing first {MAX_FRAMES} frames (~{MAX_FRAMES / 30:.0f}s)\n")
+    print(f"Video: {video.name}")
+    print(f"Looking at the first {MAX_FRAMES} frames\n")
 
-    kp, fps = extract_raw_kp(VIDEO, MAX_FRAMES)
-    print(f"\nPerson detected in {100 * np.mean(kp[:, HIP_L, 3] > 0.3):.0f}% of frames")
-    
+    kp, fps = extract_raw_kp(video, MAX_FRAMES)
+    print(f"\nGot a pose in {100 * np.mean(kp[:, HIP_L, 3] > 0.3):.0f}% of frames")
+
     windows = detect_actions(kp)
-    print("\nDetected candidates:")
+    print("\nCandidates:")
     for action in ACTIONS:
         for s, e in windows[action]:
             print(f"  {action:<10} frames {s:4d}-{e:4d}  ({(e - s + 1) / fps:.1f}s)")
         if not windows[action]:
-            print(f"  {action:<10} -- none found")
+            print(f"  {action:<10} nothing found")
 
     total_frames = len(kp)
     for action in ACTIONS:
@@ -202,11 +228,12 @@ def main() -> None:
         for i, (s, e) in enumerate(wins):
             start = max(0, s - CLIP_PAD)
             end = min(total_frames - 1, e + CLIP_PAD)
-            out_path = out_dir / f"auto_{i:02d}.mp4"
-            save_clip(VIDEO, start, end, fps, out_path)
-            print(f"  Saved {out_path.relative_to(PROJECT_ROOT)}  ({(end - start + 1) / fps:.1f}s)")
+            # keep the source name in the clip name so two videos don't clobber each other
+            out_path = out_dir / f"{video.stem[:40]}_auto_{i:02d}.mp4"
+            save_clip(video, start, end, fps, out_path)
+            print(f"  saved {out_path.relative_to(PROJECT_ROOT)}  ({(end - start + 1) / fps:.1f}s)")
 
-    print(f"\nDone. Review clips in data/clips/auto_test/")
+    print("\nDone. Clips are in data/clips/auto_test/, watch them and keep the good ones.")
 
 
 if __name__ == "__main__":

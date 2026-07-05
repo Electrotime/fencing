@@ -1,4 +1,4 @@
-"""Phase 3 — blade detection and tip extraction using a fine-tuned YOLO model."""
+"""Blade detection with the fine-tuned YOLO model, plus tip position/velocity helpers."""
 
 from __future__ import annotations
 
@@ -11,11 +11,10 @@ from ultralytics import YOLO
 
 MIN_BLADE_CONFIDENCE = 0.3
 NULL_VELOCITY = (0.0, 0.0)
-VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 
 
 def load_blade_model(weights_path: str | Path) -> YOLO:
-    """Load YOLO weights from disk."""
+    """Load the trained blade weights."""
     weights_path = Path(weights_path)
     if not weights_path.exists():
         raise FileNotFoundError(f"Weights not found: {weights_path}")
@@ -23,7 +22,11 @@ def load_blade_model(weights_path: str | Path) -> YOLO:
 
 
 def get_blade_tip(frame: np.ndarray, model: YOLO) -> tuple[float, float] | None:
-    """Return centroid of best blade detection as (x, y), or None if nothing found."""
+    """Center of the most confident blade box as (x, y), or None if no blade found.
+
+    The box center isn't literally the tip, but without knowing which end points
+    at the opponent it's the safest single point to use.
+    """
     results = model(frame, conf=MIN_BLADE_CONFIDENCE, verbose=False)
     boxes = results[0].boxes
     if boxes is None or len(boxes) == 0:
@@ -38,7 +41,7 @@ def get_blade_tip_trajectory(
     video_path: str | Path,
     model: YOLO,
 ) -> list[tuple[float, float] | None]:
-    """Run blade detection on every frame of a video, return per-frame tip positions."""
+    """Blade tip position for every frame of a video (None where nothing was found)."""
     video_path = Path(video_path)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -62,7 +65,7 @@ def get_blade_tip_trajectory(
 def compute_tip_velocity(
     trajectory: list[tuple[float, float] | None],
 ) -> list[tuple[float, float]]:
-    """Frame-to-frame blade tip displacement. None frames get (0, 0)."""
+    """How far the tip moved between frames. Frames with no detection get (0, 0)."""
     if not trajectory:
         return []
 
@@ -88,17 +91,17 @@ if __name__ == "__main__":
     assert vel[1] == (2.0, 2.0)
     assert vel[2] == (0.0, 0.0)
     assert vel[3] == (0.0, 0.0)
-    print("Test 1 passed: compute_tip_velocity logic correct")
+    print("test 1 ok: velocity math checks out")
 
     if not WEIGHTS.exists():
-        print(f"\nWeights not found at {WEIGHTS} — skipping Tests 2 & 3.")
+        print(f"\nno weights at {WEIGHTS}, skipping the model tests")
     else:
         model = load_blade_model(WEIGHTS)
 
         blank = np.zeros((480, 640, 3), dtype=np.uint8)
         tip = get_blade_tip(blank, model)
-        assert tip is None, f"Expected None on blank frame, got {tip}"
-        print("Test 2 passed: no false detection on blank frame")
-        print("Test 3: run get_blade_tip on a real frame to verify visually.")
+        assert tip is None, f"expected None on a black frame, got {tip}"
+        print("test 2 ok: nothing detected on a black frame (good)")
+        print("test 3: run get_blade_tip on a real frame and eyeball the result")
 
-    print("\nSmoke tests passed.")
+    print("\ndone")
