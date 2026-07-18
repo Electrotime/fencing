@@ -74,15 +74,20 @@ def _landmarks_to_array(result: mp.tasks.vision.PoseLandmarkerResult) -> np.ndar
 
 
 def _normalize(kp: np.ndarray) -> np.ndarray:
-    """Center the keypoints on the hips and scale by shoulder width, so it doesn't
+    """Center the keypoints on the hips and scale by torso length, so it doesn't
     matter where the fencer is standing or how big they are in frame.
-    z and visibility stay untouched."""
+
+    Torso length (shoulder midpoint to hip midpoint) instead of shoulder width:
+    fencers stand side-on, so the projected shoulder distance collapses to almost
+    nothing and the scale blew up (measured ~300x on real clips). The torso stays
+    a stable reference from every angle. z and visibility stay untouched."""
     kp = kp.copy()
     hip_mid = (kp[HIP_LEFT, :2] + kp[HIP_RIGHT, :2]) / 2.0
-    shoulder_w = float(np.linalg.norm(kp[SHOULDER_LEFT, :2] - kp[SHOULDER_RIGHT, :2]))
-    if shoulder_w < 1e-6:
-        shoulder_w = 1.0
-    kp[:, :2] = (kp[:, :2] - hip_mid) / shoulder_w
+    shoulder_mid = (kp[SHOULDER_LEFT, :2] + kp[SHOULDER_RIGHT, :2]) / 2.0
+    torso_len = float(np.linalg.norm(shoulder_mid - hip_mid))
+    if torso_len < 1e-6:
+        torso_len = 1.0
+    kp[:, :2] = (kp[:, :2] - hip_mid) / torso_len
     return kp
 
 
@@ -123,7 +128,7 @@ def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
                 ok, frame = cap.read()
                 if not ok:
                     break
-
+                
                 timestamp_ms = int(frame_idx * 1000 / fps)
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -154,24 +159,26 @@ if __name__ == "__main__":
     assert kp_blank.shape == (N_LANDMARKS, 4)
     assert np.allclose(kp_blank, 0.0)
     print("test 1 ok: blank frame gives zeros with the right shape")
-
+    
     sample_dir = PROJECT_ROOT / "data" / "sample_frames"
-    samples = sorted(sample_dir.glob("*.jpg"))
+    # leave pose_viz.jpg out, that's our own output. otherwise reruns detect on
+    # the drawn-over image and stack stale skeletons on top of each other
+    samples = sorted(p for p in sample_dir.glob("*.jpg") if p.stem != "pose_viz")
     if not samples:
         print("no sample frames around, skipping tests 2 and 3")
         sys.exit(0)
-
+    
     sample_img = cv2.imread(str(samples[0]))
     kp = extract_keypoints_from_frame(sample_img)
     assert kp.shape == (N_LANDMARKS, 4)
-
+    
     if np.any(kp[:, 3] > 0):
         hip_mid = (kp[HIP_LEFT, :2] + kp[HIP_RIGHT, :2]) / 2.0
         assert np.allclose(hip_mid, 0.0, atol=1e-4), f"hips should be at (0,0), got {hip_mid}"
         print("test 2 ok: found a person and the hips ended up at (0, 0)")
     else:
         print("test 2 skipped: no person in the sample frame")
-
+    
     viz_img = sample_img.copy()
     h, w = viz_img.shape[:2]
 

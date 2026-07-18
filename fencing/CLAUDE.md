@@ -195,7 +195,7 @@ Use `RunningMode.VIDEO` for `extract_keypoints_from_video` (temporal tracking); 
 **Post-processing rules:**
 1. Any keypoint with visibility < 0.5 → replace its x,y,z with the previous frame's values (carry-forward interpolation). For the first frame, use zeros.
 2. Normalize all x,y coordinates relative to the hip midpoint (average of landmarks 23 and 24). After normalization, the hip midpoint is (0, 0).
-3. Scale by dividing by the shoulder width (distance between landmarks 11 and 12) so the representation is size-invariant.
+3. Scale by dividing by the torso length (shoulder midpoint to hip midpoint) so the representation is size-invariant. (Originally shoulder width, landmarks 11-12 — changed 2026-07 after measurement: fencers stand side-on, so projected shoulder width collapses toward zero and amplified coordinates up to ~300x. Torso length is rotation-stable.)
 4. Do NOT normalize z or visibility — keep them raw.
 
 **Verification step:** After running the pipeline, write a quick visualization that draws the MediaPipe skeleton back onto a sample frame using `mp.solutions.drawing_utils` to confirm keypoints look correct.
@@ -272,10 +272,11 @@ def compute_tip_velocity(trajectory: list) -> list[tuple[float, float]]:
 ```python
 CLASS_NAMES = ["advance", "lunge", "parry", "retreat"]
 SEQ_LEN = 60       # frames per clip (pad/trim all clips to this)
-INPUT_SIZE = 132   # 33 keypoints × 4 values (x, y, z, visibility) — face landmarks
-                   # 1-10 will be near-zero due to low visibility (mask occlusion) and
-                   # the carry-forward zeroing in Phase 2; keep them in the tensor so
-                   # array shapes stay consistent, don't drop them
+INPUT_SIZE = 132   # 33 keypoints × 4 values (x, y, z, visibility). Face landmarks
+                   # 1-10 stay in the tensor. NOTE (measured, 2026-07): MediaPipe
+                   # reports them with visibility ~1.0 even under a fencing mask —
+                   # it guesses their positions from head shape — so they are NOT
+                   # zeroed by the carry-forward step; they just track the head.
 HIDDEN_SIZE = 128
 NUM_CLASSES = 4
 ```
@@ -430,10 +431,10 @@ def draw_action_label(frame: np.ndarray, action: str, confidence: float) -> np.n
 - 13: left elbow, 14: right elbow, 15: left wrist, 16: right wrist
 - 23: left hip, 24: right hip, 25: left knee, 26: right knee
 - 27: left ankle, 28: right ankle
-- Landmarks 1-10: face — occluded by fencing mask; their visibility will be low so the Phase 2 carry-forward logic will zero them out. Keep them in the feature vector (do not drop) so INPUT_SIZE stays 132.
+- Landmarks 1-10: face — physically hidden by the fencing mask, but MediaPipe still places them with visibility ~1.0 (verified on sample frames; it infers them from head shape). They will NOT be zeroed by the carry-forward logic. Keep them in the feature vector (INPUT_SIZE stays 132) — they track the head and are harmless, just don't build handcrafted features from them.
 
 ### Fencing-specific challenges
-- Fencing masks occlude face landmarks (1-10). Always filter these out or ignore them.
+- Fencing masks cover the face, but MediaPipe confidently hallucinates landmarks 1-10 anyway (visibility ~1.0). Don't rely on visibility to filter them; just never use them as action features.
 - The sword arm (typically right arm for right-handed fencers) is the primary action signal for bladework.
 - Footwork signal: relative distance and velocity between landmarks 27 and 28 (ankles).
 - Fast actions (fleche, ballestra) cause motion blur. If keypoint visibility drops below 0.3 on >50% of landmarks in a frame, flag it as a low-quality frame and consider skipping it for training.
@@ -485,7 +486,7 @@ This video is the thing that goes in the portfolio and GitHub README. Everything
 
 ## Current status
 
-**Updated 2026-07-05 — Phases 0–3 complete. Phase 4 (action recognition) is next, blocked on clip collection.**
+**Updated 2026-07-18 — Phases 0–4 running. First action model trained (70% val acc on 53 clips); growing the clip dataset is the current focus.**
 
 - Phase 0 ✓ — environment verified on Python 3.14 (`scripts/smoke_test.py`)
 - Phase 1 ✓ — `scripts/extract_blade_frames.py`; 400 frames extracted and labeled in Roboflow
@@ -493,13 +494,24 @@ This video is the thing that goes in the portfolio and GitHub README. Everything
 - Phase 3 ✓ — blade detector trained (YOLO11n): `models/blade_yolo/fencing_blade_v2/weights/best.pt`,
   val metrics P 0.79 / R 0.74 / mAP50 0.74; loaded by `src/blade_detector.py`
 - Extra: `scripts/auto_clip.py` — experimental heuristic that proposes action-clip windows from a
-  raw match video (pass the video path as an argument); review its output manually and move
+  raw match video (pass the video path as an argument); review its output manually and moved
   keepers into `data/clips/<action>/`
 - Raw match footage is gitignored and lives locally/OneDrive, not in the repo
 
-**Blocking Phase 4:** the action-clip dataset. `data/clips/` has 1 clip and `data/keypoints/` is
-empty. Collect clips per class (single fencer per clip!), run `scripts/process_clips.py`, then
-implement `src/action_model.py`.
+- Phase 4 ✓ (first pass) — `src/action_model.py` + `src/train_action.py`; trained on 53 clips
+  (advance 21 / lunge 12 / retreat 11 / parry 9): 70% val accuracy, `models/action_lstm.pth`.
+  Normalization was changed from shoulder-width to torso-length scaling (see Phase 2 rules) and
+  all keypoints regenerated — re-run `scripts/process_clips.py --force` after any future
+  normalization change.
+
+**Current focus: grow the clip dataset.** Target ~30-40 clips/class; priority parry, then
+lunge/retreat. Known-weak clips to re-crop or replace: advance `New 11`/`New 12`, lunge
+`New 5 (1)`/`New 8 (1)` (fencer too small in crop — MediaPipe misses or half-tracks them).
+Clip-cutting rules learned the hard way: crop tight (fencer ≥ half frame height), keep the
+action inside the first 2 s, cut every class with the same ~0.5 s lead-in / 0.3 s lead-out,
+label by the clip's dominant action. Clip videos are gitignored (local/OneDrive only); the
+extracted `data/keypoints/*.npy` are tracked in git. Banners with printed fencers can fool the
+YOLO person detector (not MediaPipe pose), so eyeball auto-crops before trusting them.
 
 When the user says something like "let's start" or "let's do Phase X", begin by:
 1. Stating which phase you're working on

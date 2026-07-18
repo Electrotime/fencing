@@ -24,3 +24,10 @@ yolov8n.pt
 
 # ── Large raw footage (kept in OneDrive / locally, not in git) ──
 fencing/data/raw_video/*.mp4
+
+# ── Action clips: video stays local/OneDrive, git tracks the extracted
+#    keypoints (data/keypoints/*.npy) instead ──
+fencing/data/clips/**/*.mp4
+fencing/data/clips/**/*.avi
+fencing/data/clips/**/*.mov
+fencing/data/clips/**/*.mkv
