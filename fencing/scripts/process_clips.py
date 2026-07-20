@@ -16,7 +16,7 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.pose_pipeline import extract_keypoints_from_video
+from src.pose_pipeline import extract_keypoints_and_pan_from_video
 
 CLIPS_BASE = PROJECT_ROOT / "data" / "clips"
 KEYPOINTS_BASE = PROJECT_ROOT / "data" / "keypoints"
@@ -32,6 +32,16 @@ def process_class(action: str, force: bool) -> tuple[int, int]:
     kp_dir.mkdir(parents=True, exist_ok=True)
 
     clips = sorted(p for p in clips_dir.iterdir() if p.suffix.lower() in VIDEO_EXTENSIONS)
+
+    # prune keypoints whose source clip got deleted/renamed, so stale data from
+    # an older normalization never sneaks into training
+    stems = {c.stem for c in clips}
+    for npy in kp_dir.glob("*.npy"):
+        stem = npy.name[:-len(".pan.npy")] if npy.name.endswith(".pan.npy") else npy.stem
+        if stem not in stems:
+            npy.unlink()
+            print(f"  [{action}] removed stale {npy.name} (no matching clip)")
+
     if not clips:
         print(f"  [{action}] no clips here yet -> {clips_dir}")
         return 0, 0
@@ -41,13 +51,15 @@ def process_class(action: str, force: bool) -> tuple[int, int]:
     print(f"\n--- {action} ({len(clips)} clips) ---")
     for clip in clips:
         out_path = kp_dir / f"{clip.stem}.npy"
-        if out_path.exists() and not force:
+        pan_path = kp_dir / f"{clip.stem}.pan.npy"  # camera-pan track, same length
+        if out_path.exists() and pan_path.exists() and not force:
             print(f"  {clip.name} already done, skipping (--force to redo)")
             skipped += 1
             continue
-        kp = extract_keypoints_from_video(clip)
+        kp, pan = extract_keypoints_and_pan_from_video(clip)
         np.save(out_path, kp)
-        print(f"  {clip.name} -> {kp.shape} -> {out_path.name}")
+        np.save(pan_path, pan)
+        print(f"  {clip.name} -> {kp.shape} + pan -> {out_path.name}")
         done += 1
 
     return done, skipped

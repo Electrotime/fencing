@@ -18,6 +18,12 @@ VISIBILITY_THRESHOLD = 0.5
 
 SHOULDER_LEFT, SHOULDER_RIGHT = 11, 12
 HIP_LEFT, HIP_RIGHT = 23, 24
+ANKLE_LEFT, ANKLE_RIGHT = 27, 28
+
+# background-pan estimation (recovers the footwork direction the panning camera hides)
+PAN_DOWNSCALE = (320, 180)  # small grayscale copies used for phase correlation
+PAN_STRIP_FRAC = 0.22       # width of the left/right background strips
+PAN_MIN_RESPONSE = 0.08     # phaseCorrelate confidence gate
 
 _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
@@ -91,6 +97,69 @@ def _normalize(kp: np.ndarray) -> np.ndarray:
     return kp
 
 
+def _median3(xy: np.ndarray) -> np.ndarray:
+    """3-frame median filter on (n, 33, 2) coordinates. Kills the single-frame
+    teleports the tracker sometimes produces without smearing real motion."""
+    if len(xy) < 3:
+        return xy
+    out = xy.copy()
+    out[1:-1] = np.median(np.stack([xy[:-2], xy[1:-1], xy[2:]]), axis=0)
+    return out
+
+
+def _normalize_sequence(kp_seq: np.ndarray) -> np.ndarray:
+    """Clip-level cleanup: despike, center on the hips, scale by body height.
+
+    Body height (shoulder-mid to ankle-mid, median over the clip) instead of a
+    per-frame torso length: the torso foreshortens when a fencer leans into a
+    lunge, and dividing by it each frame crushed exactly the leg-spread signal
+    that makes a lunge a lunge. One stable scale per clip keeps proportions
+    honest across the whole action. z and visibility stay untouched."""
+    if len(kp_seq) == 0:
+        return kp_seq
+    kp = kp_seq.copy()
+    kp[:, :, :2] = _median3(kp[:, :, :2])
+    hip_mid = (kp[:, HIP_LEFT, :2] + kp[:, HIP_RIGHT, :2]) / 2.0
+    sho_mid = (kp[:, SHOULDER_LEFT, :2] + kp[:, SHOULDER_RIGHT, :2]) / 2.0
+    ank_mid = (kp[:, ANKLE_LEFT, :2] + kp[:, ANKLE_RIGHT, :2]) / 2.0
+    heights = np.abs(sho_mid[:, 1] - ank_mid[:, 1])
+    heights = heights[heights > 1e-6]
+    scale = float(np.median(heights)) if len(heights) else 1.0
+    kp[:, :, :2] = (kp[:, :, :2] - hip_mid[:, None, :]) / scale
+    return kp
+
+
+def _estimate_pan(grays: list[np.ndarray]) -> np.ndarray:
+    """Per-frame horizontal background shift in px (at 320px width), + = scene moved right.
+
+    The broadcast camera follows the fencer, so her true travel barely shows in
+    the keypoints -- but it's written all over the background. Phase-correlate the
+    left/right border strips of the content region between consecutive frames:
+    borders so the fencer herself doesn't vote, content region so the static
+    pillarbox bars and scoreboard don't pin the answer to zero."""
+    n = len(grays)
+    if n < 2:
+        return np.zeros(max(n, 1), dtype=np.float32)
+    stack = np.stack(grays)
+    col_activity = stack.std(axis=0).mean(axis=0)
+    active = np.where(col_activity > 2.0)[0]
+    x0, x1 = (int(active[0]), int(active[-1]) + 1) if len(active) > 10 else (0, stack.shape[2])
+    strip_w = max(10, int(PAN_STRIP_FRAC * (x1 - x0)))
+    strips = [(x0, x0 + strip_w), (x1 - strip_w, x1)]
+    rows = slice(18, 135)  # skip the broadcast graphics up top and scoreboard below
+    window = cv2.createHanningWindow((strip_w, rows.stop - rows.start), cv2.CV_32F)
+
+    pan = [0.0]
+    for i in range(1, n):
+        shifts = []
+        for a, b in strips:
+            (dx, _), response = cv2.phaseCorrelate(grays[i - 1][rows, a:b], grays[i][rows, a:b], window)
+            if response > PAN_MIN_RESPONSE:
+                shifts.append(dx)
+        pan.append(float(np.median(shifts)) if shifts else pan[-1])
+    return np.array(pan, dtype=np.float32)
+
+
 def extract_keypoints_from_frame(frame: np.ndarray) -> np.ndarray:
     """One BGR frame -> (33, 4) normalized keypoints. All zeros if nobody's there."""
     global _landmarker_single
@@ -103,9 +172,13 @@ def extract_keypoints_from_frame(frame: np.ndarray) -> np.ndarray:
     return _normalize(_landmarks_to_array(result))
 
 
-def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
-    """Whole video -> (n_frames, 33, 4). Joints that drop out get carried over
-    from the previous frame instead of jumping to garbage."""
+def extract_keypoints_and_pan_from_video(video_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    """Whole video -> ((n, 33, 4) cleaned keypoints, (n,) background pan per frame).
+
+    The pan track is what saves footwork direction: the camera pans to follow the
+    fencer, so her hips barely move in-frame -- the background is the only place
+    the real advance/retreat travel survives. Meant for short action clips (it
+    buffers small grayscale copies of every frame for the pan estimate)."""
     video_path = Path(video_path)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -118,7 +191,8 @@ def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
         # timestamps, so 30 works fine as a stand-in
         fps = 30.0
 
-    out: list[np.ndarray] = []
+    raw: list[np.ndarray] = []
+    grays: list[np.ndarray] = []
     prev = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
 
     with _make_landmarker(mp.tasks.vision.RunningMode.VIDEO) as landmarker:
@@ -128,7 +202,7 @@ def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
                 ok, frame = cap.read()
                 if not ok:
                     break
-                
+
                 timestamp_ms = int(frame_idx * 1000 / fps)
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -140,13 +214,25 @@ def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
                 low_vis = kp[:, 3] < VISIBILITY_THRESHOLD
                 kp[low_vis, :3] = prev[low_vis, :3]
                 prev = kp.copy()
-                out.append(_normalize(kp))
+                raw.append(kp)
+
+                small = cv2.resize(frame, PAN_DOWNSCALE)
+                grays.append(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32))
 
                 frame_idx += 1
                 bar.update(1)
 
     cap.release()
-    return np.stack(out) if out else np.zeros((0, N_LANDMARKS, 4), dtype=np.float32)
+    if not raw:
+        return (np.zeros((0, N_LANDMARKS, 4), dtype=np.float32),
+                np.zeros(0, dtype=np.float32))
+    return _normalize_sequence(np.stack(raw)), _estimate_pan(grays)
+
+
+def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
+    """Whole video -> (n, 33, 4) cleaned keypoints. Same as the function above,
+    just without the pan track, for callers that only want the pose."""
+    return extract_keypoints_and_pan_from_video(video_path)[0]
 
 
 if __name__ == "__main__":
