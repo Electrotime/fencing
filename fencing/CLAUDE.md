@@ -192,11 +192,13 @@ options = mp.tasks.vision.PoseLandmarkerOptions(
 Use `RunningMode.IMAGE` for `extract_keypoints_from_frame` (no temporal context).
 Use `RunningMode.VIDEO` for `extract_keypoints_from_video` (temporal tracking); pass `timestamp_ms = int(frame_index * 1000 / fps)` to each `detect_for_video()` call.
 
-**Post-processing rules:**
+**Post-processing rules (video path — all measured-and-revised 2026-07):**
 1. Any keypoint with visibility < 0.5 → replace its x,y,z with the previous frame's values (carry-forward interpolation). For the first frame, use zeros.
-2. Normalize all x,y coordinates relative to the hip midpoint (average of landmarks 23 and 24). After normalization, the hip midpoint is (0, 0).
-3. Scale by dividing by the torso length (shoulder midpoint to hip midpoint) so the representation is size-invariant. (Originally shoulder width, landmarks 11-12 — changed 2026-07 after measurement: fencers stand side-on, so projected shoulder width collapses toward zero and amplified coordinates up to ~300x. Torso length is rotation-stable.)
-4. Do NOT normalize z or visibility — keep them raw.
+2. 3-frame median filter on x,y over the clip — the tracker occasionally teleports a joint for one frame (measured spikes up to ~100x body size); the median kills those without smearing real motion.
+3. Normalize x,y relative to the hip midpoint (landmarks 23/24 average). After normalization the hip midpoint is (0, 0).
+4. Scale by the per-clip MEDIAN body height (shoulder-mid to ankle-mid). History: spec said per-frame shoulder width → collapsed to ~0 for side-on fencers (~300x blowups); then per-frame torso length → foreshortens during lunges and crushed the leg-spread signal. A single per-clip height is stable through every action.
+5. Do NOT normalize z or visibility — keep them raw.
+6. The video extractor also returns a per-frame **camera-pan track** (background shift via phase correlation on border strips; `extract_keypoints_and_pan_from_video`). The camera follows the fencer, so this pan is the only surviving record of her true travel — it is what makes advance vs retreat learnable. `process_clips.py` saves it as `<clip>.pan.npy` beside each keypoint file.
 
 **Verification step:** After running the pipeline, write a quick visualization that draws the MediaPipe skeleton back onto a sample frame using `mp.solutions.drawing_utils` to confirm keypoints look correct.
 
@@ -277,7 +279,12 @@ INPUT_SIZE = 132   # 33 keypoints × 4 values (x, y, z, visibility). Face landma
                    # reports them with visibility ~1.0 even under a fencing mask —
                    # it guesses their positions from head shape — so they are NOT
                    # zeroed by the carry-forward step; they just track the head.
-HIDDEN_SIZE = 128
+HIDDEN_SIZE = 64   # spec said 2x128; measured at ~80 clips the small 1-layer net wins
+N_AGG_FEATURES = 4 # engineered clip-level stats fed straight into the classifier head:
+                   # net forward motion (camera pan x facing direction), stance width p90,
+                   # wrist speed p90, total travel. Measured: +23 accuracy points vs
+                   # keypoints alone (51% -> 74%), retreat recall 3% -> 67%. The LSTM
+                   # cannot rediscover these from 132 channels at this dataset size.
 NUM_CLASSES = 4
 ```
 
@@ -486,7 +493,18 @@ This video is the thing that goes in the portfolio and GitHub README. Everything
 
 ## Current status
 
-**Updated 2026-07-18 — Phases 0–4 running. First action model trained (70% val acc on 53 clips); growing the clip dataset is the current focus.**
+**Updated 2026-07-20 — Phase 4 redesigned after diagnosis: hybrid LSTM + engineered features, 75% val acc on 81 clips (10-seed estimate 74% ± 13). Growing lunge/retreat clips is the current focus.**
+
+Key findings baked into the pipeline (don't re-learn these the hard way):
+- The broadcast camera PANS to follow the fencer, so keypoints alone cannot tell advance
+  from retreat — hip drift in-frame is near zero and points both ways. True travel is
+  recovered from background pan (phase correlation) x facing direction (nose vs hips).
+- Clips contain fencers facing both directions; without the pan-x-facing feature those
+  classes are mirror-ambiguous.
+- Per-frame scale references wobble with pose (shoulders collapse side-on, torso
+  foreshortens in lunges); per-clip median body height is the stable choice.
+- Tracker teleport spikes forged fake wide stances in advance clips until the 3-frame
+  median filter; that plus a stance-width p90 feature is what makes lunge separable.
 
 - Phase 0 ✓ — environment verified on Python 3.14 (`scripts/smoke_test.py`)
 - Phase 1 ✓ — `scripts/extract_blade_frames.py`; 400 frames extracted and labeled in Roboflow
