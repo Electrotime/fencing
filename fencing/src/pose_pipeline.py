@@ -81,13 +81,14 @@ def _landmarks_to_array(result: mp.tasks.vision.PoseLandmarkerResult) -> np.ndar
 
 def _normalize(kp: np.ndarray) -> np.ndarray:
     """Center the keypoints on the hips and scale by torso length, so it doesn't
-    matter where the fencer is standing or how big they are in frame.
+    matter where the fencer is standing or how big they are in frame. 
 
     Torso length (shoulder midpoint to hip midpoint) instead of shoulder width:
     fencers stand side-on, so the projected shoulder distance collapses to almost
     nothing and the scale blew up (measured ~300x on real clips). The torso stays
     a stable reference from every angle. z and visibility stay untouched."""
     kp = kp.copy()
+    head_center = (kp)
     hip_mid = (kp[HIP_LEFT, :2] + kp[HIP_RIGHT, :2]) / 2.0
     shoulder_mid = (kp[SHOULDER_LEFT, :2] + kp[SHOULDER_RIGHT, :2]) / 2.0
     torso_len = float(np.linalg.norm(shoulder_mid - hip_mid))
@@ -173,12 +174,14 @@ def extract_keypoints_from_frame(frame: np.ndarray) -> np.ndarray:
 
 
 def extract_keypoints_and_pan_from_video(video_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
-    """Whole video -> ((n, 33, 4) cleaned keypoints, (n,) background pan per frame).
+    """Whole video -> ((n, 33, 4) cleaned keypoints, (n, 2) motion track).
 
-    The pan track is what saves footwork direction: the camera pans to follow the
-    fencer, so her hips barely move in-frame -- the background is the only place
-    the real advance/retreat travel survives. Meant for short action clips (it
-    buffers small grayscale copies of every frame for the pan estimate)."""
+    Motion track columns: [background pan (px @320w), raw hip-x (fraction of frame
+    width, BEFORE hip-centering)]. Together they recover the fencer's true travel:
+    world motion = how she moved across the frame (hip-x) + how far the camera
+    moved to keep her there (pan). Pan alone was enough when the camera tracked her
+    tightly; on looser broadcasts she visibly crosses the frame, and the hip-x term
+    is what catches that. Meant for short clips (buffers small grayscale frames)."""
     video_path = Path(video_path)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -225,8 +228,11 @@ def extract_keypoints_and_pan_from_video(video_path: str | Path) -> tuple[np.nda
     cap.release()
     if not raw:
         return (np.zeros((0, N_LANDMARKS, 4), dtype=np.float32),
-                np.zeros(0, dtype=np.float32))
-    return _normalize_sequence(np.stack(raw)), _estimate_pan(grays)
+                np.zeros((0, 2), dtype=np.float32))
+    raw_stack = np.stack(raw)
+    hip_x = (raw_stack[:, HIP_LEFT, 0] + raw_stack[:, HIP_RIGHT, 0]) / 2.0  # pre-normalization
+    motion = np.stack([_estimate_pan(grays), hip_x], axis=1).astype(np.float32)  # (n, 2)
+    return _normalize_sequence(raw_stack), motion
 
 
 def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:

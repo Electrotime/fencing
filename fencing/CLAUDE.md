@@ -198,7 +198,7 @@ Use `RunningMode.VIDEO` for `extract_keypoints_from_video` (temporal tracking); 
 3. Normalize x,y relative to the hip midpoint (landmarks 23/24 average). After normalization the hip midpoint is (0, 0).
 4. Scale by the per-clip MEDIAN body height (shoulder-mid to ankle-mid). History: spec said per-frame shoulder width → collapsed to ~0 for side-on fencers (~300x blowups); then per-frame torso length → foreshortens during lunges and crushed the leg-spread signal. A single per-clip height is stable through every action.
 5. Do NOT normalize z or visibility — keep them raw.
-6. The video extractor also returns a per-frame **camera-pan track** (background shift via phase correlation on border strips; `extract_keypoints_and_pan_from_video`). The camera follows the fencer, so this pan is the only surviving record of her true travel — it is what makes advance vs retreat learnable. `process_clips.py` saves it as `<clip>.pan.npy` beside each keypoint file.
+6. The video extractor also returns a per-frame **motion track** of shape (n, 2) = [background pan (phase correlation on border strips), raw hip-x before centering] via `extract_keypoints_and_pan_from_video`. World travel = in-frame hip-x + camera pan; this is what makes advance vs retreat learnable (pan alone works only when the camera tracks tightly; the hip-x term catches looser broadcasts). `process_clips.py` saves it as `<clip>.pan.npy` (still that name) beside each keypoint file.
 
 **Verification step:** After running the pipeline, write a quick visualization that draws the MediaPipe skeleton back onto a sample frame using `mp.solutions.drawing_utils` to confirm keypoints look correct.
 
@@ -281,9 +281,11 @@ INPUT_SIZE = 132   # 33 keypoints × 4 values (x, y, z, visibility). Face landma
                    # zeroed by the carry-forward step; they just track the head.
 HIDDEN_SIZE = 64   # spec said 2x128; measured at ~80 clips the small 1-layer net wins
 N_AGG_FEATURES = 4 # engineered clip-level stats fed straight into the classifier head:
-                   # net forward motion (camera pan x facing direction), stance width p90,
-                   # wrist speed p90, total travel. Measured: +23 accuracy points vs
-                   # keypoints alone (51% -> 74%), retreat recall 3% -> 67%. The LSTM
+                   # net forward motion (WORLD travel = in-frame hip-x + camera pan,
+                   # signed by facing), stance width p90, wrist speed p90, total travel.
+                   # Measured: engineered feats vs keypoints alone +23 pts (51%->74%);
+                   # combining hip-x with pan (vs pan alone) lifted advance/retreat
+                   # direction accuracy 84%->94% and advance recall 78%->92%. The LSTM
                    # cannot rediscover these from 132 channels at this dataset size.
 NUM_CLASSES = 4
 ```
@@ -493,7 +495,7 @@ This video is the thing that goes in the portfolio and GitHub README. Everything
 
 ## Current status
 
-**Updated 2026-07-20 — Phase 4 redesigned after diagnosis: hybrid LSTM + engineered features, 75% val acc on 81 clips (10-seed estimate 74% ± 13). Growing lunge/retreat clips is the current focus.**
+**Updated 2026-07-22 — Phase 4 hybrid LSTM + engineered features, 148 balanced clips, 10-seed 85% ± 4.5% (advance 92 / lunge 88 / retreat 86 / parry 74). Parry is now the weakest class; growing it is the focus.**
 
 Key findings baked into the pipeline (don't re-learn these the hard way):
 - The broadcast camera PANS to follow the fencer, so keypoints alone cannot tell advance
