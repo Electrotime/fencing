@@ -1,0 +1,276 @@
+"""Minimal end-to-end demo: run the whole stack on a video and save an annotated copy.
+
+Per frame: YOLO finds the fencer(s) -> each one gets cropped and run through
+MediaPipe pose -> sliding windows of keypoints feed the action LSTM at two
+scales (a short one so brief actions like parries aren't buried, a long one
+for sustained footwork) -> skeleton, boxes, labels and blade tip get drawn.
+Works with one or two fencers. Offline, writes <video>_demo.mp4 next to the input.
+
+Run from project root:  python scripts/demo_video.py path/to/video.mp4 [out.mp4]
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import deque
+from contextlib import ExitStack
+from pathlib import Path
+
+import cv2
+import mediapipe as mp
+import numpy as np
+import torch
+from tqdm import tqdm
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.action_model import (ActionLSTM, CLASS_NAMES, INPUT_SIZE, SEQ_LEN,
+                              _engineered_features)
+from src.blade_detector import get_blade_tip, load_blade_model
+from src.person_detector import crop_box, get_fencer_boxes, load_person_model
+from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
+                               _landmarks_to_array, _make_landmarker,
+                               _normalize_sequence)
+from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
+
+MODEL_PATH = PROJECT_ROOT / "models" / "action_lstm.pth"
+BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
+                 / "weights" / "best.pt")
+
+PREDICT_EVERY = 5     # frames between action predictions (labels hold in between)
+MIN_REAL_FRAMES = 15  # don't guess an action until we've tracked this many frames
+
+# multi-scale windows: a parry lasts ~12 frames, so 2s of surrounding footwork
+# buries it in a single 60-frame window (measured: parry recall 3x better at
+# short windows). Fast actions get judged on the short window, sustained ones
+# (advance/retreat rhythm) on the long one.
+WINDOW_LONG = SEQ_LEN   # 60 frames / 2 s
+WINDOW_SHORT = 25       # ~0.8 s
+MIN_REAL_SHORT = 12
+FAST_CLASSES = {"parry"}   # extension joins this set once the 6-class model lands
+FAST_CONF = 0.65           # a short-window override has to be at least this sure
+MIN_BOX_H_FRAC = 0.35 # ignore "people" shorter than this fraction of frame height
+                      # (banner graphics of fencers trigger real YOLO detections --
+                      # measured one at 0.30 of frame height, real fencers 0.4+)
+PAN_STRIP_FRAC = 0.22
+PAN_MIN_RESPONSE = 0.08
+SLOT_COLORS = {"A": (0, 200, 255), "B": (255, 200, 0)}  # amber / cyan-blue (BGR)
+
+
+class FencerTrack:
+    """Sliding history for one fencer slot (A = left, B = right)."""
+
+    def __init__(self) -> None:
+        self.kp: deque[np.ndarray] = deque(maxlen=SEQ_LEN)      # (33, 4) frame fractions
+        self.motion: deque[tuple[float, float]] = deque(maxlen=SEQ_LEN)  # (pan, hip_x)
+        self.prev = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
+        self.last_hip_x = 0.5
+        self.label: str | None = None
+        self.conf = 0.0
+        self.counts: dict[str, int] = {}  # how often each label got emitted
+
+
+def _frame_pan(prev_gray: np.ndarray | None, gray: np.ndarray,
+               windows: dict) -> float:
+    """Horizontal background shift between two frames, from L/R border strips."""
+    if prev_gray is None:
+        return 0.0
+    h, w = gray.shape
+    strip_w = max(10, int(PAN_STRIP_FRAC * w))
+    rows = slice(int(0.10 * h), int(0.75 * h))  # skip broadcast graphics / scoreboard
+    if "win" not in windows:
+        windows["win"] = cv2.createHanningWindow((strip_w, rows.stop - rows.start), cv2.CV_32F)
+    shifts = []
+    for a, b in [(0, strip_w), (w - strip_w, w)]:
+        (dx, _), response = cv2.phaseCorrelate(prev_gray[rows, a:b], gray[rows, a:b],
+                                               windows["win"])
+        if response > PAN_MIN_RESPONSE:
+            shifts.append(dx)
+    return float(np.median(shifts)) if shifts else 0.0
+
+
+def _assign_boxes(dets: list[np.ndarray], tracks: dict[str, FencerTrack],
+                  W: int) -> dict[str, np.ndarray | None]:
+    """Match this frame's detections to the A/B tracks by continuity.
+
+    Pure left/right slotting splits a fencer's history across two tracks the
+    moment a second person enters or she drifts over the frame midline -- the
+    action window resets and labels vanish. So: whoever has history keeps the
+    box nearest their last hip position; left/right only breaks fresh starts."""
+    slots: dict[str, np.ndarray | None] = {"A": None, "B": None}
+    if not dets:
+        return slots
+    history = {s: tracks[s].last_hip_x
+               for s, t in tracks.items() if any(np.any(k) for k in t.kp)}
+    cxs = [float((b[0] + b[2]) / 2 / W) for b in dets]
+
+    if len(dets) == 1:
+        if history:
+            slot = min(history, key=lambda s: abs(cxs[0] - history[s]))
+        else:
+            slot = "A" if cxs[0] < 0.5 else "B"
+        slots[slot] = dets[0]
+        return slots
+
+    # two detections: left/right by default, but swap if the remembered
+    # positions say the fencers are the other way around
+    order = np.argsort(cxs)
+    left, right = dets[order[0]], dets[order[1]]
+    lcx, rcx = cxs[order[0]], cxs[order[1]]
+    straight = sum(abs(c - history[s]) for s, c in (("A", lcx), ("B", rcx)) if s in history)
+    swapped = sum(abs(c - history[s]) for s, c in (("A", rcx), ("B", lcx)) if s in history)
+    if history and swapped < straight:
+        slots["A"], slots["B"] = right, left
+    else:
+        slots["A"], slots["B"] = left, right
+    return slots
+
+
+def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarray,
+                     min_real: int) -> tuple[str | None, float]:
+    """Classify one window of keypoints. Returns (label, confidence) or (None, 0)."""
+    real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)
+    if real.sum() < min_real:
+        return None, 0.0
+    kp = kp_seq[np.argmax(real):]
+    norm = _normalize_sequence(kp)
+    agg = _engineered_features(norm, motion_seq)
+
+    flat = norm.reshape(len(norm), -1).astype(np.float32)
+    if len(flat) >= SEQ_LEN:
+        flat = flat[:SEQ_LEN]
+    else:
+        flat = np.concatenate([flat, np.zeros((SEQ_LEN - len(flat), INPUT_SIZE), np.float32)])
+
+    with torch.no_grad():
+        logits = model(torch.from_numpy(flat)[None], torch.from_numpy(agg)[None])
+        probs = torch.softmax(logits, dim=1)[0]
+    idx = int(probs.argmax())
+    return CLASS_NAMES[idx], float(probs[idx])
+
+
+def _predict(model: ActionLSTM, track: FencerTrack) -> None:
+    """Multi-scale prediction: short window catches fast actions (parry), long
+    window reads sustained ones. A confident fast-action hit on the short window
+    overrides the long-window call; otherwise the long window decides."""
+    kp_full = np.stack(track.kp)
+    mot_full = np.array(track.motion, dtype=np.float32)
+
+    long_label, long_conf = _classify_window(
+        model, kp_full[-WINDOW_LONG:], mot_full[-WINDOW_LONG:], MIN_REAL_FRAMES)
+    short_label, short_conf = _classify_window(
+        model, kp_full[-WINDOW_SHORT:], mot_full[-WINDOW_SHORT:], MIN_REAL_SHORT)
+
+    if short_label in FAST_CLASSES and short_conf >= FAST_CONF:
+        track.label, track.conf = short_label, short_conf
+    elif long_label is not None:
+        track.label, track.conf = long_label, long_conf
+    if track.label is not None:
+        track.counts[track.label] = track.counts.get(track.label, 0) + 1
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4]")
+    video = Path(sys.argv[1])
+    if not video.exists():
+        sys.exit(f"video not found: {video}")
+    out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else video.with_name(f"{video.stem}_demo.mp4")
+
+    print("loading models...")
+    person_model = load_person_model()
+    action_model = ActionLSTM()
+    action_model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+    action_model.eval()
+    blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
+    if blade_model is None:
+        print("(no blade weights found, skipping the blade tip overlay)")
+
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        sys.exit(f"couldn't open {video}")
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not np.isfinite(fps) or fps <= 0:
+        fps = 30.0
+    W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (W, H))
+
+    tracks = {"A": FencerTrack(), "B": FencerTrack()}
+    prev_gray = None
+    pan_windows: dict = {}
+
+    with ExitStack() as stack:
+        landmarkers = {
+            slot: stack.enter_context(_make_landmarker(mp.tasks.vision.RunningMode.VIDEO))
+            for slot in tracks
+        }
+        for idx in tqdm(range(total), desc=video.stem[:40], unit="frame"):
+            ok, frame = cap.read()
+            if not ok:
+                break
+
+            gray = cv2.cvtColor(cv2.resize(frame, (320, 180)), cv2.COLOR_BGR2GRAY).astype(np.float32)
+            pan = _frame_pan(prev_gray, gray, pan_windows)
+            prev_gray = gray
+
+            box_a, box_b = get_fencer_boxes(frame, person_model, min_h_frac=MIN_BOX_H_FRAC)
+            boxes = _assign_boxes([b for b in (box_a, box_b) if b is not None], tracks, W)
+            timestamp = int(idx * 1000 / fps)
+
+            for slot, box in (("A", boxes["A"]), ("B", boxes["B"])):
+                track = tracks[slot]
+                kp = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
+                crop = crop_box(frame, box)
+                if crop is not None:
+                    rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                    result = landmarkers[slot].detect_for_video(
+                        mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp)
+                    kp = _landmarks_to_array(result)
+                    if np.any(kp):
+                        # map crop coordinates back into full-frame fractions
+                        x1, y1, x2, y2 = box
+                        kp[:, 0] = (x1 + kp[:, 0] * (x2 - x1)) / W
+                        kp[:, 1] = (y1 + kp[:, 1] * (y2 - y1)) / H
+                        # carry occluded joints forward, same as training
+                        low = kp[:, 3] < VISIBILITY_THRESHOLD
+                        kp[low, :3] = track.prev[low, :3]
+                        track.prev = kp.copy()
+                        track.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)
+
+                track.kp.append(kp)
+                track.motion.append((pan, track.last_hip_x))
+
+                if idx % PREDICT_EVERY == 0 and len(track.kp) >= MIN_REAL_FRAMES:
+                    _predict(action_model, track)
+
+                # draw this fencer
+                color = SLOT_COLORS[slot]
+                if box is not None:
+                    x1, y1, x2, y2 = box.astype(int)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+                if np.any(kp):
+                    pts = np.stack([kp[:, 0] * W, kp[:, 1] * H], axis=1)
+                    draw_skeleton(frame, pts)
+                if track.label is not None:
+                    org = (10, 40) if slot == "A" else (W - 360, 40)
+                    draw_action_label(frame, f"{slot}: {track.label}", track.conf,
+                                      org=org, color=color)
+
+            if blade_model is not None:
+                draw_blade_tip(frame, get_blade_tip(frame, blade_model))
+
+            writer.write(frame)
+
+    cap.release()
+    writer.release()
+    for slot, track in tracks.items():
+        mix = ", ".join(f"{k} {v}" for k, v in sorted(track.counts.items(), key=lambda kv: -kv[1]))
+        print(f"fencer {slot} label mix: {mix if mix else '(none)'}")
+    print(f"\ndone -> {out_path}")
+
+
+if __name__ == "__main__":
+    main()

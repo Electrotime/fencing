@@ -524,14 +524,52 @@ Key findings baked into the pipeline (don't re-learn these the hard way):
   all keypoints regenerated — re-run `scripts/process_clips.py --force` after any future
   normalization change.
 
-**Current focus: grow the clip dataset.** Target ~30-40 clips/class; priority parry, then
-lunge/retreat. Known-weak clips to re-crop or replace: advance `New 11`/`New 12`, lunge
-`New 5 (1)`/`New 8 (1)` (fencer too small in crop — MediaPipe misses or half-tracks them).
+**Current focus: expand to 7 classes for priority.** Decided 2026-07-22 (committing to a
+right-of-way / priority engine in Phase 5). Three classes being added; folders scaffolded at
+`data/clips/{neutral,extension,walking}/` (empty, waiting for clips):
+- **walking** — upright square-stance walking (between phrases, back to the line). Kept
+  separate from neutral because a walking fencer translates forward, so the forward-motion
+  feature confidently fires "advance" on it — it must be modeled, and folding it into
+  neutral would make that class kinematically bimodal (crouched guard vs upright gait).
+  Downstream, priority logic treats walking the same as neutral (no priority action).
+- **neutral** — the idle baseline: en-garde/ready, small bounces, prep steps, distance
+  management, pauses between phrases. NOT a frozen statue (or small footwork trips
+  advance/retreat). It's the most common match state, so in the demo it keeps labels blank
+  until a real action happens. Fixes the "lunge 97% over an en-garde pause" false positives.
+- **extension** — sword arm straightens to threaten the point, no lunge leg-drive. The atom
+  the priority rules key on (extension establishes the attack). Subtle: arm-only, overlaps
+  lunge (which contains it) and shares the wrist signature with parry. So when clips exist,
+  ALSO add an engineered **arm-reach feature** (wrist-to-shoulder distance along facing) to
+  separate extension (forward) from parry (lateral) from neutral (bent) — same playbook as
+  stance-width for lunge and forward-motion for advance/retreat. N_AGG_FEATURES 4 -> 5.
+
+Sequencing (deliberately not done yet, to keep the working 4-class demo alive): collect
+neutral + extension + walking clips FIRST, then in one commit flip CLASS_NAMES to 7,
+NUM_CLASSES=7, add the arm-reach feature, and retrain. Lock this 7-class list before
+Phase 5 — the touch predictor's input width depends on it. Add a demo confidence floor
+(~60%) so idle frames stay blank rather than flickering.
+
+The demo already runs **multi-scale windows** (implemented 2026-07-23 in
+`scripts/demo_video.py`): a 25-frame short window catches fast actions and a 60-frame long
+window reads sustained ones; a confident (>=0.65) fast-class hit on the short window
+overrides the long-window label. Measured motivation: parries are ~12 frames, and a single
+2 s window buried them (peak parry prob 0.57 -> never wins for one fencer; 3x more parry
+detections at short windows). When the 7-class model lands, add `extension` to
+FAST_CLASSES there.
+
 Clip-cutting rules learned the hard way: crop tight (fencer ≥ half frame height), keep the
 action inside the first 2 s, cut every class with the same ~0.5 s lead-in / 0.3 s lead-out,
 label by the clip's dominant action. Clip videos are gitignored (local/OneDrive only); the
 extracted `data/keypoints/*.npy` are tracked in git. Banners with printed fencers can fool the
 YOLO person detector (not MediaPipe pose), so eyeball auto-crops before trusting them.
+
+**Phase 5 (touch predictor) data — label OUTCOMES, not actions.** Action labeling is done and
+feeds this stage. New effort is a small scorer CSV per bout: `timestamp_start,timestamp_end,
+scorer` with scorer in {A,B,N}. At train time the action model runs on each window and its
+class probs become INPUT features (with blade-tip velocity + joint angles); the label is who
+scored. Priority = a RULE layer over the action streams (extension establishes attack; parry
+transfers priority to defender -> riposte; simultaneous -> no touch) — no extra labels, and
+more explainable than a learned model. Awarded touch = blade contact + priority.
 
 When the user says something like "let's start" or "let's do Phase X", begin by:
 1. Stating which phase you're working on

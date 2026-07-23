@@ -178,11 +178,18 @@ def train_action_model(
     batch_size: int = 16,
     lr: float = 1e-3,
     val_split: float = 0.2,
+    seed: int = 42,
+    quiet: bool = False,
 ) -> dict:
     """Full training loop. Keeps whichever epoch scored best on validation.
 
+    seed controls both the train/val split and the weight init, so training a few
+    different seeds and keeping the winner gives a stronger shipped checkpoint.
+    quiet=True only prints every 10th epoch (plus new-best epochs).
+
     Returns {"train_losses": [...], "val_losses": [...], "val_accuracies": [...]}.
     """
+    torch.manual_seed(seed)
     device = _pick_device()
     dataset = FencingDataset(keypoints_dir)
 
@@ -192,7 +199,7 @@ def train_action_model(
         raise ValueError(f"only {len(dataset)} clip(s) total, not enough to train "
                          "and still hold some out for validation")
     train_ds, val_ds = random_split(dataset, [n_train, n_val],
-                                    generator=torch.Generator().manual_seed(42))
+                                    generator=torch.Generator().manual_seed(seed))
     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_dl = DataLoader(val_ds, batch_size=batch_size)
 
@@ -239,10 +246,12 @@ def train_action_model(
             best_acc = val_acc
             torch.save(model.state_dict(), save_path)
             note = "  <- best so far, saved"
-        print(f"epoch {epoch:3d}/{epochs}  train loss {train_loss:.4f}  "
-              f"val loss {val_loss:.4f}  val acc {val_acc:.1%}{note}")
+        if not quiet or note or epoch % 10 == 0 or epoch == epochs:
+            print(f"epoch {epoch:3d}/{epochs}  train loss {train_loss:.4f}  "
+                  f"val loss {val_loss:.4f}  val acc {val_acc:.1%}{note}")
 
-    _print_val_report(save_path, val_dl, device)
+    if not quiet:
+        _print_val_report(save_path, val_dl, device)
     return history
 
 

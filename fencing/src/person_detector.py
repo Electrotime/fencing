@@ -14,15 +14,17 @@ def load_person_model() -> YOLO:
     return YOLO("yolov8n.pt")
 
 
-def get_fencer_crops(
+def get_fencer_boxes(
     frame: np.ndarray,
     model: YOLO,
+    min_h_frac: float = 0.0,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Crop out both fencers. A is the fencer on the left, B is on the right.
+    """Find both fencers, return their xyxy boxes as (box_A, box_B). A = left, B = right.
 
     If only one person shows up, whichever half of the frame they're on decides
-    the slot, and the other slot is None. A slot is also None if its box is
-    useless (would crop down to nothing).
+    the slot, and the other slot is None. min_h_frac drops detections shorter
+    than that fraction of frame height -- printed fencers on backdrop banners
+    trigger real person detections, and box size is what tells them apart.
     """
     results = model(frame, classes=[PERSON_CLASS_ID], conf=MIN_CONFIDENCE, verbose=False)
     boxes = results[0].boxes
@@ -31,6 +33,12 @@ def get_fencer_crops(
 
     xyxy = boxes.xyxy.cpu().numpy()
     confs = boxes.conf.cpu().numpy()
+
+    if min_h_frac > 0:
+        tall = (xyxy[:, 3] - xyxy[:, 1]) >= min_h_frac * frame.shape[0]
+        xyxy, confs = xyxy[tall], confs[tall]
+        if len(xyxy) == 0:
+            return None, None
 
     # more than 2 people means a ref or a coach got picked up too, keep the 2 strongest
     if len(xyxy) > 2:
@@ -42,20 +50,35 @@ def get_fencer_crops(
     xyxy = xyxy[order]
     x_centers = x_centers[order]
 
-    h, w = frame.shape[:2]
-
-    def _crop(box: np.ndarray) -> np.ndarray | None:
-        x1, y1, x2, y2 = box.astype(int)
-        crop = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
-        return crop if crop.size > 0 else None
-
     if len(xyxy) == 1:
         # only found one person, so use their side of the frame to guess which
         # fencer it is instead of always calling them fencer A
-        crop = _crop(xyxy[0])
-        return (crop, None) if x_centers[0] < w / 2 else (None, crop)
+        return (xyxy[0], None) if x_centers[0] < frame.shape[1] / 2 else (None, xyxy[0])
 
-    return _crop(xyxy[0]), _crop(xyxy[1])
+    return xyxy[0], xyxy[1]
+
+
+def crop_box(frame: np.ndarray, box: np.ndarray | None) -> np.ndarray | None:
+    """Cut a box out of the frame. None if the box is missing or degenerate."""
+    if box is None:
+        return None
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = box.astype(int)
+    crop = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
+    return crop if crop.size > 0 else None
+
+
+def get_fencer_crops(
+    frame: np.ndarray,
+    model: YOLO,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Crop out both fencers. A is the fencer on the left, B is on the right.
+
+    Same slot logic as get_fencer_boxes; a slot is also None if its box would
+    crop down to nothing.
+    """
+    box_a, box_b = get_fencer_boxes(frame, model)
+    return crop_box(frame, box_a), crop_box(frame, box_b)
 
 
 if __name__ == "__main__":
