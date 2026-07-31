@@ -257,9 +257,9 @@ if __name__ == "__main__":
     # the drawn-over image and stack stale skeletons on top of each other
     samples = sorted(p for p in sample_dir.glob("*.jpg") if p.stem != "pose_viz")
     if not samples:
-        print("no sample frames around, skipping tests 2 and 3")
+        print("no sample frames around, skipping tests 2 and 3")  
         sys.exit(0)
-    
+     
     sample_img = cv2.imread(str(samples[0]))
     kp = extract_keypoints_from_frame(sample_img)
     assert kp.shape == (N_LANDMARKS, 4)

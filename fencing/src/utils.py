@@ -42,11 +42,11 @@ def draw_blade_tip(frame: np.ndarray, tip: tuple[float, float] | None) -> np.nda
     return frame
 
 
-def draw_action_label(frame: np.ndarray, action: str, confidence: float,
+def draw_action_label(frame: np.ndarray, action: str, confidence: float | None,
                       org: tuple[int, int] = (10, 40),
                       color: tuple[int, int, int] = (0, 200, 255)) -> np.ndarray:
-    """Action name + confidence on a dark box so it reads over any background."""
-    text = f"{action}  {confidence:.0%}"
+    """Action name (+ confidence, if given) on a dark box so it reads over any background."""
+    text = action if confidence is None else f"{action}  {confidence:.0%}"
     (tw, th), base = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
     x, y = org
     cv2.rectangle(frame, (x - 6, y - th - 8), (x + tw + 6, y + base + 4), (0, 0, 0), -1)
@@ -70,6 +70,7 @@ if __name__ == "__main__":
 
     draw_action_label(canvas, "lunge", 0.87)
     draw_action_label(canvas, "parry", 0.55, org=(200, 280))
-    print("test 3 ok: labels drawn")
+    draw_action_label(canvas, "A: ready", None, org=(10, 120))  # ready tag, no %
+    print("test 3 ok: labels drawn (with and without confidence)")
 
     print("\nall good")

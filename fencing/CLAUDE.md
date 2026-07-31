@@ -495,7 +495,10 @@ This video is the thing that goes in the portfolio and GitHub README. Everything
 
 ## Current status
 
-**Updated 2026-07-22 — Phase 4 hybrid LSTM + engineered features, 148 balanced clips, 10-seed 85% ± 4.5% (advance 92 / lunge 88 / retreat 86 / parry 74). Parry is now the weakest class; growing it is the focus.**
+**Updated 2026-07-23 — Phase 4: SIX classes shipped (advance, lunge, parry, retreat,
+neutral, walking), h128 hybrid LSTM + 6 engineered features, 213 clips / 488 windows,
+10-seed 85.1% ± 6% (lun 98 / wal 90 / ret 85 / neu 80 / adv 65 / par 65). Extension is a
+FEATURE (arm-reach), not a class.**
 
 Key findings baked into the pipeline (don't re-learn these the hard way):
 - The broadcast camera PANS to follow the fencer, so keypoints alone cannot tell advance
@@ -507,6 +510,170 @@ Key findings baked into the pipeline (don't re-learn these the hard way):
   foreshortens in lunges); per-clip median body height is the stable choice.
 - Tracker teleport spikes forged fake wide stances in advance clips until the 3-frame
   median filter; that plus a stance-width p90 feature is what makes lunge separable.
+- Walking and advance are both "moving forward" — only posture splits them. The crouch
+  feature (median knee angle: fencing ~140° vs upright ~164°, 84% separable) plus
+  inverse-frequency class weighting (slicing makes walking/neutral many more windows)
+  rescued advance after the 6-class flip.
+- The 6 engineered features (`_engineered_features`): net-forward, stance-width p90,
+  wrist-speed p90, total-travel, arm-reach p90 (=extension, drives Phase 5 priority),
+  crouch.
+- Improvement dead ends (measured, don't re-run): mirror augmentation trades parry for
+  advance (no net win); velocity channels never help; 2-layer LSTM worse. h64→h128 at
+  488 windows was worth +1.5 pts. Parry's true signature (lateral blade sweep) is
+  UNRECOVERABLE from side-on 2D — image-plane direction and MediaPipe z both measured
+  identical to lunge. Needs 3D pose or a second camera; document as a known limitation.
+- Confusion (10-seed): advance leaks to parry/lunge/walking; parry leaks to retreat;
+  the biggest raw error mass is neutral↔walking swaps, which are downstream-harmless
+  (both mean "no priority action").
+
+**KNOWN OPEN BUG — the second fencer reads "retreat" through stoppages (2026-07-24).**
+On the 40 s match segment the left fencer (slot A, facing right) gets a sane mix, while
+the right fencer (slot B, facing left) reads `retreat` ~134/237 windows, `advance` 1 and
+`neutral` 3. Ground-truthed to real errors: pulled the frames where A=neutral and
+B=retreat, and the match clock is frozen at 2:34 with the fencers far apart — a stoppage
+where both should read neutral/walking. Reproduces across 6 freshly-trained seeds, so it
+is not the shipped checkpoint. What it is NOT (all measured, don't re-run):
+- NOT the engineered features. Ablating each of the 6 to its neutral-class median leaves
+  B at 134→148 retreats. Swapping pathways localises it: A's keypoints stay neutral-heavy
+  with B's features, B's keypoints never go neutral with A's features. It's the LSTM path.
+- NOT `nose_dir` instability. Facing sign is stable over the bout (A right 196/229,
+  B left 214/237, only 4 flips each), and B's net-forward feature is correctly balanced
+  (82 positive / 92 negative) — the feature is right, the classifier ignores it.
+- NOT pose quality. demo A vs B are identical on size-in-frame (0.31/0.29), jitter
+  (0.0079/0.0083), carried-forward joints (0%/0.4%), visibility (0.99/0.99).
+- NOT facing coverage. Per-CLIP counts are balanced: neutral 12 right/11 left, and every
+  class has ≥11 clips on its thinner side.
+- NOT fixable by mirroring. Facing canonicalisation was tried BOTH ways and both lose:
+  with the L/R landmark swap 81.8% vs 85.1% baseline; without the swap 80.6% vs 87.1%,
+  and it merely moves the damage (facing-left 84%→85%, facing-right 91%→76%). Mirroring
+  changes a fencer's handedness, and the sword-arm side is real signal.
+What IS established: a real but modest out-of-sample facing gap — held-out accuracy 91%
+facing right vs 84% facing left (the earlier in-sample check showed 89%/89% and was blind
+to it, since it can't see a generalisation gap). 7 points cannot explain a 134:1 skew, so
+the residual is most likely DOMAIN gap: every training clip is Aaron's own footage/venue/
+camera, while the demo is broadcast footage of elite fencers. Best next lever is data from
+the demo's own domain — neutral/idle clips cut from BROADCAST stoppages, both facings —
+not another architecture change.
+
+**RETRACTED (2026-07-24) — there is NO domain gap. Do not repeat this claim.** An earlier
+version of this section said the training clips were "textbook-wide" while match footwork
+was "compact", based on bout stance 0.30–0.36 vs train advance 0.45–0.91. That comparison
+was confounded and the conclusion was wrong on two counts. (1) Aaron's clips are themselves
+cut from broadcast matches — same source domain, and indeed same 1920x1080 / 29.97 fps as
+the demo. (2) The comparison averaged ALL bout windows, but a bout window is a 2 s sliding
+window over continuous video and most of them are idle, repositioning or stoppage, while
+training clips are pure action. Restricting the bout to its ACTIVE windows (top quartile of
+travel) the two line up almost exactly: stance 0.58 vs 0.54, crouch 0.55 vs 0.57, arm-reach
+0.21 vs 0.21, net-forward 2.48 vs 1.87. Windows inside the advance band on all six features
+go 19% → 40% once idle windows are dropped. The training data covers the bout fine.
+Also NOT pose quality: re-extracting training clips through the demo's person-crop RAISES
+jitter (0.0122 → 0.0158) instead of lowering it toward the demo's 0.008, and subject size is
+comparable (train 0.19–0.40 of frame height, bout 0.29–0.31). No re-extraction needed.
+
+**ROOT CAUSE — advance loses INSIDE its own feature region; it is the decision boundary,
+not coverage.** Of the 89 bout windows sitting inside the training advance band on all six
+features, the model calls lunge 55 (62%), retreat 30 (34%) and advance 4 (4%). The features
+are right there and it still will not say advance; the median probability gap to the winner
+is 0.341, far too wide for threshold tuning to paper over. Two concrete train/serve
+mismatches feed this, both in how the WINDOW is built rather than in the model:
+- Zero padding is a spurious class cue. Clip length tracks class (lunge/parry 24f → 60%
+  zeros, advance 46f, retreat 48f, neutral/walking sliced → 0%), and the head mean-pools
+  across the padding. Re-padding the same clips by holding the last frame drops in-sample
+  accuracy 85% → 53% and flips 40% of calls, lunge→advance on 16 clips. The demo pads
+  nothing, so the model's strongest cue is absent exactly when it matters.
+- The action sits at the WRONG END. Training builds `kp[:SEQ_LEN]` = [action | zeros]; the
+  demo feeds the last 60 frames of a live track = [context | action]. An LSTM is sequential,
+  so this is not cosmetic.
+Consequence worth remembering: val accuracy barely constrains demo behaviour. Models scoring
+82–92% on validation span 1.9%–35.4% advance on the bout, because validation shares the
+padding artifact and continuous video does not. Score candidate changes on `val@hold`
+(same clips re-padded by holding the last frame) as a continuous-video proxy, not on val alone.
+Four fixes tested and REJECTED (don't re-run):
+- Per-frame world-motion channels into the LSTM (in.132→134, velocity + cumulative
+  displacement). The LSTM is fed hip-centred frames so it cannot see translation, and
+  direction rests on one scalar against 128 LSTM dims — but adding it LOSES: 85.4%→83.5%,
+  advance recall 78%→60%. Mean-pooling makes per-frame velocity ≈ the existing net-forward
+  scalar, so it is redundant noise plus extra capacity to overfit on 488 windows.
+- Shorter demo windows / adding advance to FAST_CLASSES. `advance` is flat at 3–6% across
+  60f/40f/25f/18f windows — it is not being diluted. Shortening just converts retreat into
+  lunge and parry as displacement stops accumulating.
+- Horizontal (x-axis) augmentation, u~U(0.55,1.10), to widen stance tolerance:
+  val 86.3%→82.9%, advance recall 83%→67%, bout-advance 12%→4%. Loses on every axis.
+- Reseeding / best-of-N. Bout-advance is ~5–7% for EVERY model. A 5-seed ensemble is worth
+  having for other reasons (val 84.4%→85.6%, out-of-domain sd 4.1%→1.7%, range 1.9–20.2%
+  →3.0–7.1%) but converges to 5% advance, not up. Note val accuracy barely constrains
+  out-of-domain behaviour: models scoring 82–92% on validation span 1.9%–35.4% bout-advance.
+**SHIPPED (2026-07-29).** Two changes, and neither one fixes advance — be clear about that.
+- *Masked pooling* (`ActionLSTM.forward(..., lengths)`). Pools over real frames only, so the
+  padding artifact above is gone. Isolated 6-seed test: val@hold 82.3% → 85.0%, padding-style
+  gap 4.0 → 0.8 pts, costing 0.6 pts on the zero-padded score that was partly measuring the
+  artifact. `lengths=None` still means "pool everything", so old callers keep working. Note
+  the demo's SHORT window (25 real frames padded to 60, 58% zeros) fed that artifact hardest,
+  so `parry` behaviour shifts most after this change.
+- *`ActionEnsemble` + `load_action_model()`*, 5 members at `models/action_lstm.m*.pth`. For
+  CONSISTENCY, not accuracy: single checkpoints at equal val accuracy land anywhere from
+  advance=6%/lunge=50% to advance=25%/lunge=7% on the same bout. Measured 2.4x less
+  out-of-domain variance (sd 4.1% → 1.7%). Averages PROBABILITIES not logits (independently
+  trained members are not calibrated against each other). Falls back to the single checkpoint
+  when the members are absent.
+
+**STILL OPEN — `lunge` is systematically over-predicted (~42% of bout windows).** A real bout
+should be nearer 10-15%. This is NOT a bad checkpoint: 5 ensemble members spanning 7%-50%
+still average 42%. It is also not the features — bout active windows sit at wrist-speed 0.06
+and reach 0.21 against train lunge's 0.17 and 0.28, so the engineered features do NOT say
+lunge; the LSTM path does. The cause is most likely that the task is ill-posed at this window
+size: a 2 s window during active fencing holds step-step-lunge-recover, the classes are
+defined on single-action clips, so mixed windows fall to whichever class has the loosest
+boundary. That reading is what motivated the per-frame model below.
+
+**PER-FRAME MODEL (2026-07-29) — `ActionFrameLSTM`, `--frame-model`, kept ALONGSIDE.**
+One label per frame instead of per window, so a window can hold an advance AND a lunge.
+Needs no new annotation (each clip is a single action, so every real frame already carries
+its label) and turns 488 windows into ~20k supervised frames, which also attacks the thin
+transient classes directly. 12 seeds vs the window model: bout advance 9.7% → 14.3%, bout
+lunge 42.3% → 31.0% (both ~2 sigma), costing ~3 pts of held-out accuracy (86% → 83%).
+Shipped checkpoint is seed 7 (window acc 89.7%): bout advance 16%, lunge 49%, parry 5%.
+Verified the walking calls against frames — all sampled ones are genuine stoppages, clock
+frozen at 2:42/2:34 with fencers walking back to the lines. Not a failure mode.
+
+**DO NOT ensemble the per-frame model** (members deliberately not shipped). 5 members gave
+lunge 49% → 23%, the best lunge figure measured anywhere, but advance 16% → 8% and
+parry 5% → **0%**, a class gone. Averaging dilutes the probability peaks of BRIEF actions,
+and every transient class here is brief, so persistent classes take every frame. Ensembling
+helps the window model and harms this one.
+
+**Selection trap — do NOT pick a checkpoint by validation accuracy.** It has now chosen a
+lunge-heavy checkpoint twice: window seed 8 → 52% bout lunge, per-frame seed 7 → 49%, against
+sweep averages of 42% and 31%. Val accuracy is not merely uninformative about video behaviour,
+it looks mildly ANTI-correlated with it. For the window model the ensemble sidesteps this; for
+the per-frame model there is currently no good selection rule, which is a real open weakness.
+
+**STILL OPEN — the A/B asymmetry that started all this survives everything.** On the same
+footage with the per-frame model, fencer A reads advance=26% / lunge=37% while fencer B reads
+advance=7% / lunge=62%. Every fix so far moved the aggregate and left the split intact. The
+earlier facing investigation already ruled out nose_dir instability, pose quality and facing
+coverage, and canonicalisation made things worse. This is a SEPARATE problem from
+advance-vs-lunge and deserves its own investigation rather than more variants of this one.
+
+**METHOD WARNING — bout-mix numbers are noisy; do not chase small differences.** Two runs of
+the IDENTICAL current config measured advance 8% vs 14% and lunge 44% vs 32% on pure training
+noise. Per-seed bout advance spans 0.4%-34% at 82-92% val. Several deltas quoted earlier in
+this investigation ("slice-all 12%→17%", "rate features lunge 39%→27%") sit inside that band
+and should not be treated as real. Only validation-side metrics (val, val@hold, artifact gap)
+were stable enough to decide on.
+
+Also tested and REJECTED (6 seeds each, all inside noise or worse — don't re-run): shorter
+SEQ_LEN with every class sliced (24f/30f drop advance recall to 51%/73%); pre-padding so the
+action ends at the window end (advance recall 83% → 63%); filling that pad with real neutral
+context (→ 57%); rate-normalised length-invariant sum features (val +0.8, advance recall
+−13); within-window RELATIVE stance/crouch/reach instead of absolute, i.e. "how much did this
+fencer change" (val 84.6% → 85.2%, bout advance 14% → 10%); all three combined.
+
+The remaining lever is data for the transient classes. Not because of any domain gap — there
+isn't one — but because 35 advance + 33 retreat + 48 lunge clips do not determine a boundary
+in a 128-dim representation, and the seed spread above is that underdetermination showing.
+`advance` is the smallest class (35 clips → 35 windows, not sliceable; walking gets 232
+windows from 27 clips), so it is the cheapest to improve. Same broadcast sources are fine.
 
 - Phase 0 ✓ — environment verified on Python 3.14 (`scripts/smoke_test.py`)
 - Phase 1 ✓ — `scripts/extract_blade_frames.py`; 400 frames extracted and labeled in Roboflow
@@ -524,30 +691,27 @@ Key findings baked into the pipeline (don't re-learn these the hard way):
   all keypoints regenerated — re-run `scripts/process_clips.py --force` after any future
   normalization change.
 
-**Current focus: expand to 7 classes for priority.** Decided 2026-07-22 (committing to a
-right-of-way / priority engine in Phase 5). Three classes being added; folders scaffolded at
-`data/clips/{neutral,extension,walking}/` (empty, waiting for clips):
-- **walking** — upright square-stance walking (between phrases, back to the line). Kept
-  separate from neutral because a walking fencer translates forward, so the forward-motion
-  feature confidently fires "advance" on it — it must be modeled, and folding it into
-  neutral would make that class kinematically bimodal (crouched guard vs upright gait).
-  Downstream, priority logic treats walking the same as neutral (no priority action).
-- **neutral** — the idle baseline: en-garde/ready, small bounces, prep steps, distance
-  management, pauses between phrases. NOT a frozen statue (or small footwork trips
-  advance/retreat). It's the most common match state, so in the demo it keeps labels blank
-  until a real action happens. Fixes the "lunge 97% over an en-garde pause" false positives.
-- **extension** — sword arm straightens to threaten the point, no lunge leg-drive. The atom
-  the priority rules key on (extension establishes the attack). Subtle: arm-only, overlaps
-  lunge (which contains it) and shares the wrist signature with parry. So when clips exist,
-  ALSO add an engineered **arm-reach feature** (wrist-to-shoulder distance along facing) to
-  separate extension (forward) from parry (lateral) from neutral (bent) — same playbook as
-  stance-width for lunge and forward-motion for advance/retreat. N_AGG_FEATURES 4 -> 5.
-
-Sequencing (deliberately not done yet, to keep the working 4-class demo alive): collect
-neutral + extension + walking clips FIRST, then in one commit flip CLASS_NAMES to 7,
-NUM_CLASSES=7, add the arm-reach feature, and retrain. Lock this 7-class list before
-Phase 5 — the touch predictor's input width depends on it. Add a demo confidence floor
-(~60%) so idle frames stay blank rather than flickering.
+**The 6-class expansion is DONE (2026-07-23), built for the Phase 5 right-of-way engine:**
+- **neutral** (23 clips) — idle baseline: en-garde, bounces, prep steps, pauses. Keeps demo
+  labels blank until a real action happens.
+- **walking** (27 clips) — upright between-phrase walking; separate from neutral because it
+  translates forward and would otherwise fire "advance". Priority logic treats walking ≡
+  neutral (no priority action).
+- **extension** — DROPPED as a class (super short, and every lunge contains one). It lives
+  on as the arm-reach FEATURE, which the priority engine reads for "who extended first";
+  point-in-line = sustained high arm-reach + no travel. `data/clips/extension/` and
+  `data/keypoints/extension/` still exist but hold only a `.gitkeep` placeholder — they
+  are not empty, so deleting them also drops the tracked placeholder. Harmless to leave.
+- Long neutral/walking clips are auto-sliced into overlapping 60-frame windows
+  (SLICEABLE_CLASSES / SLICE_STRIDE in action_model.py); splits are GROUP-aware (a clip's
+  windows never straddle train/val — see group_stratified_split) and the loss is
+  class-weighted to counter the slicing imbalance.
+- The 6-class list is LOCKED for Phase 5 (touch predictor input width depends on it).
+- Demo overlay polish DONE (2026-07-23): `QUIET_CLASSES = {neutral, walking}` render as a
+  grey "ready" tag instead of an action label, and any call under `ACTION_CONF_FLOOR`
+  (0.50) is suppressed the same way. So labels stay silent through idle/repositioning and
+  only light up on real actions — verified on clips (walking -> "ready", parry -> amber
+  "parry 83%") and the match segment.
 
 The demo already runs **multi-scale windows** (implemented 2026-07-23 in
 `scripts/demo_video.py`): a 25-frame short window catches fast actions and a 60-frame long

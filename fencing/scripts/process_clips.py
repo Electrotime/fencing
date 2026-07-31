@@ -20,7 +20,7 @@ from src.pose_pipeline import extract_keypoints_and_pan_from_video
 
 CLIPS_BASE = PROJECT_ROOT / "data" / "clips"
 KEYPOINTS_BASE = PROJECT_ROOT / "data" / "keypoints"
-CLASS_NAMES = ["advance", "lunge", "parry", "retreat"]
+CLASS_NAMES = ["advance", "lunge", "parry", "retreat", "neutral", "walking"]
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 
 

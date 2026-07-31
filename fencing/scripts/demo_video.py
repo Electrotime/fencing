@@ -25,8 +25,9 @@ from tqdm import tqdm
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.action_model import (ActionLSTM, CLASS_NAMES, INPUT_SIZE, SEQ_LEN,
-                              _engineered_features)
+from src.action_model import (ActionFrameLSTM, ActionLSTM, CLASS_NAMES, INPUT_SIZE,
+                              SEQ_LEN, _engineered_features, frame_logits_to_window,
+                              load_action_model)
 from src.blade_detector import get_blade_tip, load_blade_model
 from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
@@ -35,6 +36,7 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
 from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
 
 MODEL_PATH = PROJECT_ROOT / "models" / "action_lstm.pth"
+FRAME_MODEL_PATH = PROJECT_ROOT / "models" / "action_frame.pth"  # --frame-model
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
 
@@ -48,8 +50,12 @@ MIN_REAL_FRAMES = 15  # don't guess an action until we've tracked this many fram
 WINDOW_LONG = SEQ_LEN   # 60 frames / 2 s
 WINDOW_SHORT = 25       # ~0.8 s
 MIN_REAL_SHORT = 12
-FAST_CLASSES = {"parry"}   # extension joins this set once the 6-class model lands
+FAST_CLASSES = {"parry"}   # brief actions the short window is allowed to override with
 FAST_CONF = 0.65           # a short-window override has to be at least this sure
+# quiet states: not fencing actions, so the overlay stays blank on them (this is why
+# neutral/walking exist -- labels only light up when something real happens)
+QUIET_CLASSES = {"neutral", "walking"}
+ACTION_CONF_FLOOR = 0.50   # below this the call is too unsure to show as an action
 MIN_BOX_H_FRAC = 0.35 # ignore "people" shorter than this fraction of frame height
                       # (banner graphics of fencers trigger real YOLO detections --
                       # measured one at 0.30 of frame height, real fencers 0.4+)
@@ -138,13 +144,22 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
     agg = _engineered_features(norm, motion_seq)
 
     flat = norm.reshape(len(norm), -1).astype(np.float32)
+    n_real = min(len(flat), SEQ_LEN)      # tell the model where the padding starts
     if len(flat) >= SEQ_LEN:
         flat = flat[:SEQ_LEN]
     else:
         flat = np.concatenate([flat, np.zeros((SEQ_LEN - len(flat), INPUT_SIZE), np.float32)])
 
+    # the short window is 25 real frames padded to 60, so 58% of it is zeros --
+    # without the length the model pools across that padding and reads it as a cue
+    lengths = torch.tensor([n_real])
     with torch.no_grad():
-        logits = model(torch.from_numpy(flat)[None], torch.from_numpy(agg)[None])
+        logits = model(torch.from_numpy(flat)[None], torch.from_numpy(agg)[None], lengths)
+        if logits.ndim == 3:
+            # per-frame model: take the newest REAL frame, i.e. what is happening
+            # now. Voting over the window would re-impose the single-label
+            # assumption this model exists to avoid.
+            logits = frame_logits_to_window(logits, lengths, mode="last")
         probs = torch.softmax(logits, dim=1)[0]
     idx = int(probs.argmax())
     return CLASS_NAMES[idx], float(probs[idx])
@@ -171,18 +186,30 @@ def _predict(model: ActionLSTM, track: FencerTrack) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4]")
-    video = Path(sys.argv[1])
+    argv = [a for a in sys.argv[1:] if a != "--frame-model"]
+    use_frame = "--frame-model" in sys.argv
+    if not argv:
+        sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
+                 "[--frame-model]")
+    video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")
-    out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else video.with_name(f"{video.stem}_demo.mp4")
+    out_path = Path(argv[1]) if len(argv) > 1 else video.with_name(f"{video.stem}_demo.mp4")
 
     print("loading models...")
     person_model = load_person_model()
-    action_model = ActionLSTM()
-    action_model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
-    action_model.eval()
+    if use_frame:
+        # per-frame head: one call per frame, so a window can hold an advance AND
+        # a lunge instead of being forced to pick one. Measured over 12 seeds:
+        # bout advance 9.7% -> 14.3%, lunge 42.3% -> 31.0%, for ~3 pts of accuracy.
+        if not FRAME_MODEL_PATH.exists():
+            sys.exit(f"no per-frame checkpoint at {FRAME_MODEL_PATH} - train one first")
+        action_model = load_action_model(FRAME_MODEL_PATH, device=torch.device("cpu"),
+                                         cls=ActionFrameLSTM)
+        print(f"using the per-frame model ({FRAME_MODEL_PATH.name})")
+    else:
+        # picks up the ensemble members if they are there, else the single checkpoint
+        action_model = load_action_model(MODEL_PATH, device=torch.device("cpu"))
     blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
     if blade_model is None:
         print("(no blade weights found, skipping the blade tip overlay)")
@@ -239,13 +266,12 @@ def main() -> None:
                         kp[low, :3] = track.prev[low, :3]
                         track.prev = kp.copy()
                         track.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)
-
+                
                 track.kp.append(kp)
                 track.motion.append((pan, track.last_hip_x))
 
                 if idx % PREDICT_EVERY == 0 and len(track.kp) >= MIN_REAL_FRAMES:
                     _predict(action_model, track)
-
                 # draw this fencer
                 color = SLOT_COLORS[slot]
                 if box is not None:
@@ -254,10 +280,16 @@ def main() -> None:
                 if np.any(kp):
                     pts = np.stack([kp[:, 0] * W, kp[:, 1] * H], axis=1)
                     draw_skeleton(frame, pts)
-                if track.label is not None:
-                    org = (10, 40) if slot == "A" else (W - 360, 40)
+                org = (10, 40) if slot == "A" else (W - 360, 40)
+                is_action = (track.label is not None
+                             and track.label not in QUIET_CLASSES
+                             and track.conf >= ACTION_CONF_FLOOR)
+                if is_action:
                     draw_action_label(frame, f"{slot}: {track.label}", track.conf,
                                       org=org, color=color)
+                elif box is not None:
+                    # tracked but not doing a scoring action -> a quiet "ready" tag
+                    draw_action_label(frame, f"{slot}: ready", None, org=org, color=(150, 150, 150))
 
             if blade_model is not None:
                 draw_blade_tip(frame, get_blade_tip(frame, blade_model))
