@@ -56,6 +56,10 @@ FAST_CONF = 0.65           # a short-window override has to be at least this sur
 # neutral/walking exist -- labels only light up when something real happens)
 QUIET_CLASSES = {"neutral", "walking"}
 ACTION_CONF_FLOOR = 0.50   # below this the call is too unsure to show as an action
+MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps are
+                        # exactly zero, i.e. held over from the previous frame by the
+                        # visibility fallback. Partial/occluded bodies were producing
+                        # confident `advance` calls off frozen skeletons.
 MIN_BOX_H_FRAC = 0.35 # ignore "people" shorter than this fraction of frame height
                       # (banner graphics of fencers trigger real YOLO detections --
                       # measured one at 0.30 of frame height, real fencers 0.4+)
@@ -140,6 +144,19 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
     if real.sum() < min_real:
         return None, 0.0
     kp = kp_seq[np.argmax(real):]
+
+    # Refuse to classify a skeleton that is mostly carried forward. When a fencer
+    # walks out of frame or gets occluded, pose_pipeline holds low-visibility
+    # joints at their previous position, so the window keeps arriving here as a
+    # plausible-looking but frozen body. Measured on the bout: 40% of `advance`
+    # calls came from windows at a frame edge or >25% frozen, and 14 of them were
+    # classifying a skeleton more than HALF carried forward. Those are not
+    # advances, they are missing data being labelled.
+    if len(kp) >= 2:
+        step = np.linalg.norm(np.diff(kp[:, :, :2], axis=0), axis=2)
+        if float(np.mean(step < 1e-9)) > MAX_FROZEN_FRAC:
+            return None, 0.0
+
     norm = _normalize_sequence(kp)
     agg = _engineered_features(norm, motion_seq)
 

@@ -51,6 +51,61 @@ def _knee_angle(hip: np.ndarray, knee: np.ndarray, ankle: np.ndarray) -> np.ndar
     return np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
 
 
+def _first_mover(kp: np.ndarray, nose_dir: float) -> float:
+    """NOT WIRED IN -- kept as a documented dead end. See the warning at the end.
+
+    +1 if the FRONT ankle starts moving first, -1 if the back one does, 0 if tied.
+
+    Aaron's cue, from fencing rather than from the data: an advance leads with the
+    front leg and the back leg follows; a retreat is the mirror. That is a
+    direction signal built from ankle TIMING, so unlike net-forward it does not
+    care about hip drift or camera pan -- which is what made a fencer rocking
+    backward through a stoppage read as `retreat`.
+
+    Only the FIRST movement counts. A cross-correlation over the whole clip scored
+    worse (advance recall 75% vs 88%) and came out sign-inverted, because several
+    clips start mid-advance and the dominant lag then captures the back leg
+    finishing the PREVIOUS step. Looking only at who moves first is immune to
+    where the clip was cut.
+
+    Measured over 8 seeds on held-out clips: advance recall 70% -> 88% and
+    advance<->retreat confusions 2/80 -> 0/80, for a small cost to retreat
+    (82% -> 77%). Adding it alongside the cross-correlation version was worse than
+    this alone (78%), so only this one was used.
+
+    THEN IT FAILED ON VIDEO, and the reason is the point of keeping this here.
+    Shipped, retrained and rendered: `advance` collapsed to 5 calls per fencer,
+    down from 64. The feature asks who moved first IN THE WINDOW. Training clips
+    are cut at the action's start, so that is the fencer initiating the action.
+    A sliding window over continuous video starts wherever it lands -- mid-stride
+    -- so the same question returns noise:
+
+        training advance clips   front 26% / back 17%   (real lean)
+        training retreat clips   front  9% / back 36%   (strong lean)
+        bout sliding windows     front 26% / back 24%   (coin flip)
+
+    So the 70% -> 88% gain was measuring a property of HOW THE CLIPS WERE CUT, not
+    a property of fencing. Same family of bug as the zero-padding artifact. The
+    biomechanics are sound; the implementation is not window-position invariant.
+    To revive it, detect stance-widening EVENTS inside the window and check leg
+    order at each event, rather than trusting the window's first frame.
+    """
+    if len(kp) < 6:
+        return 0.0
+    ax = kp[:, ANKLE_LEFT, 0] * nose_dir
+    bx = kp[:, ANKLE_RIGHT, 0] * nose_dir
+    front, back = (ax, bx) if np.mean(ax) >= np.mean(bx) else (bx, ax)
+    vf, vb = np.diff(front), np.diff(back)
+    both = np.abs(np.concatenate([vf, vb]))
+    thresh = max(1e-4, 0.5 * float(np.percentile(both, 75)))
+    moved_f, moved_b = np.abs(vf) > thresh, np.abs(vb) > thresh
+    fi = int(np.argmax(moved_f)) if moved_f.any() else len(vf)
+    bi = int(np.argmax(moved_b)) if moved_b.any() else len(vb)
+    if fi == bi:
+        return 0.0
+    return 1.0 if fi < bi else -1.0
+
+
 def _pick_device() -> torch.device:
     """cuda on the gaming pc, mps on the mac, cpu otherwise."""
     if torch.cuda.is_available():
@@ -65,7 +120,7 @@ FORWARD_SCALE = 10.0  # lifts fraction-of-width motion into a ~[-3, 3] feature r
 
 
 def _engineered_features(kp: np.ndarray, motion: np.ndarray) -> np.ndarray:
-    """Five clip-level numbers that decide the classes the raw sequence can't.
+    """Seven clip-level numbers that decide the classes the raw sequence can't.
 
     kp: (n, 33, 4) normalized keypoints with the lock-on zeros already stripped.
     motion: (n, 2) = [background pan px, raw hip-x fraction], aligned to the clip end.
@@ -85,6 +140,14 @@ def _engineered_features(kp: np.ndarray, motion: np.ndarray) -> np.ndarray:
       fencing actions (advance/lunge/retreat ~135-145 deg) from upright non-fencing
       (walking/neutral ~164 deg). Without it advance and walking collapse together,
       since both are just "moving forward" -- measured advance recall 52% -> fixed.
+    - first mover: +1 front ankle moves first, -1 back ankle first. A second,
+      independent direction signal -- see _first_mover. advance recall 70% -> 88%.
+
+    Note two of these (net forward, total travel) are raw SUMS, so they scale with
+    window length; training clips run 24-48 frames while every inference window is
+    60. Normalising them to a rate was tested and came out a wash (val +0.8,
+    advance recall -13), so they are left as sums -- but it is a real train/serve
+    difference, not a tidy design.
     """
     n = len(kp)
     if n < 2:
