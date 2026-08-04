@@ -60,7 +60,15 @@ MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps
                         # exactly zero, i.e. held over from the previous frame by the
                         # visibility fallback. Partial/occluded bodies were producing
                         # confident `advance` calls off frozen skeletons.
-MIN_BOX_H_FRAC = 0.35 # ignore "people" shorter than this fraction of frame height
+MIN_BOX_H_FRAC = 0.25 # ignore "people" shorter than this fraction of frame height.
+                      # Was 0.35, which was tuned on bout 2's tight framing and silently
+                      # amputated wider shots: on bout 2 the fencers run 0.30-0.60 so 0.35
+                      # was harmless, but bout 1 frames them at 0.20-0.50 (median box 0.360)
+                      # and 0.35 discarded 44% of REAL detections -- a slot dropped to 27%
+                      # coverage and fencers went unlabelled for stretches. Calibrated, not
+                      # guessed: bout 2's banner-graphic detections top out at 0.20 and its
+                      # real fencers start at 0.30, so 0.25 sits in that empty gap -- every
+                      # banner still rejected, 96% of bout 1's real boxes kept.
                       # (banner graphics of fencers trigger real YOLO detections --
                       # measured one at 0.30 of frame height, real fencers 0.4+)
 PAN_STRIP_FRAC = 0.22
@@ -168,7 +176,7 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
         flat = np.concatenate([flat, np.zeros((SEQ_LEN - len(flat), INPUT_SIZE), np.float32)])
 
     # the short window is 25 real frames padded to 60, so 58% of it is zeros --
-    # without the length the model pools across that padding and reads it as a cue
+    # without the length the model pools across that padding and reads it as a cue 
     lengths = torch.tensor([n_real])
     with torch.no_grad():
         logits = model(torch.from_numpy(flat)[None], torch.from_numpy(agg)[None], lengths)
@@ -194,7 +202,19 @@ def _predict(model: ActionLSTM, track: FencerTrack) -> None:
     short_label, short_conf = _classify_window(
         model, kp_full[-WINDOW_SHORT:], mot_full[-WINDOW_SHORT:], MIN_REAL_SHORT)
 
-    if short_label in FAST_CLASSES and short_conf >= FAST_CONF:
+    # The override may only ADD fast-class calls, never remove them, so it is the one
+    # path that can manufacture parries. Guard: a short window may not overrule a
+    # MORE confident long window (a 0.65 parry should not beat a 0.95 lunge). A real
+    # parry still wins easily, since a 2 s window mostly filled by the parry is
+    # exactly where the long call is weak.
+    # Honest sizing (bout 1, measured by actually disabling the path): the override
+    # contributes 16 of fencer A's 68 parry calls and 5 of B's 22 — about a quarter.
+    # This guard removes only ~4. So parry over-prediction is NOT mainly this logic;
+    # it comes from the LONG window, i.e. the model. Fixing it means fixing parry
+    # (one feature, wrist-speed p90 — see the parry notes in CLAUDE.md), not tuning
+    # here. Kept because the pathology it blocks is real, not because it moved much.
+    if (short_label in FAST_CLASSES and short_conf >= FAST_CONF
+            and (long_label is None or short_conf > long_conf)):
         track.label, track.conf = short_label, short_conf
     elif long_label is not None:
         track.label, track.conf = long_label, long_conf
@@ -271,6 +291,7 @@ def main() -> None:
                 if crop is not None:
                     rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
                     result = landmarkers[slot].detect_for_video(
+                        
                         mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp)
                     kp = _landmarks_to_array(result)
                     if np.any(kp):
@@ -280,6 +301,7 @@ def main() -> None:
                         kp[:, 1] = (y1 + kp[:, 1] * (y2 - y1)) / H
                         # carry occluded joints forward, same as training
                         low = kp[:, 3] < VISIBILITY_THRESHOLD
+
                         kp[low, :3] = track.prev[low, :3]
                         track.prev = kp.copy()
                         track.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)

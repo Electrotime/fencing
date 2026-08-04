@@ -541,15 +541,38 @@ boundary. That reading is what motivated the per-frame model below.
 
 ### Open bugs
 
-- **`lunge` over-predicted (~42% of bout windows; real bouts ~10–15%).** Not a bad draw —
-  5 members spanning 7–50% still average 42%. Not the features either: bout active windows
-  sit at wrist-speed 0.06 / reach 0.21 vs train lunge 0.17 / 0.28. It is the LSTM path.
-- **`advance` is not detected on video.** After the frozen gate, fencer B produces 0 and
-  fencer A's fire mostly on stoppage-walking. `walking` and `advance` are effectively
-  SWAPPED out of domain — adjacent classes separated in training only by crouch and stance.
-- **A/B asymmetry survives everything.** Same footage, per-frame model: A advance=26%/
-  lunge=37%, B advance=7%/lunge=62%. Every fix moved the aggregate and left the split
-  intact. A SEPARATE problem from advance-vs-lunge; deserves its own investigation.
+**⚠ SCOPE CORRECTION (2026-08-02) — the two bugs below are BOUT-2-SPECIFIC, not systematic.**
+Everything in this file up to this date was measured on ONE 40 s segment of
+`Bout #2 without break.mp4`. A second segment (`Bout #1 without break (1).mp4`, ~5:00 in)
+behaves completely differently on the same checkpoints:
+
+| | bout 2 | bout 1 |
+|---|---|---|
+| lunge share | **43%** | **13%** |
+| fencer B advance | 9 | 29 (more than A) |
+| fencer B neutral | 1 | 86 (its top label) |
+
+So `lunge` over-prediction and the A/B asymmetry do NOT reproduce. Bout 1's mix even looks
+like a plausible bout (walking+neutral 49%, retreat 16%, lunge 13%, parry 11%, advance 10%).
+Measured differences: bout 2 is a TIGHTER shot (fencer height 0.463 vs 0.391 of frame) with
+far more reliable two-fencer detection (1.83 vs 1.19 detections/frame).
+**Do not conclude bout 1 is "correct"** — there is no ground truth for it either, and a
+plausible histogram is exactly what produced the false advance result before. What IS
+established is that behaviour varies enormously between bouts, so any single-bout number
+here is a sample of one. Re-check on both before believing anything.
+
+- **`lunge` over-predicted on bout 2 (~42%; bout 1 gives 13%).** Within bout 2 it is not a
+  bad draw — 5 members spanning 7–50% still average 42% — and not the features either
+  (active windows sit at wrist-speed 0.06 / reach 0.21 vs train lunge 0.17 / 0.28), so
+  within that footage it is the LSTM path.
+- **`advance` not detected on bout 2.** After the frozen gate fencer B produces 0 and A's
+  fire mostly on stoppage-walking; `walking` and `advance` are effectively swapped there.
+  Bout 1 does not show this. Adjacent classes separated in training only by crouch/stance.
+- **A/B asymmetry: bout 2 only.** There A advance=26%/lunge=37% vs B advance=7%/lunge=62%
+  and no fix touched it. Bout 1 reverses which fencer looks better, so it is NOT positional
+  and NOT the slot-assignment logic. Handedness is also ruled out: training is 61% right /
+  39% left (well balanced), and bout 2's broken fencer B is RIGHT-handed, i.e. the majority
+  class. The bout-2 lefty (A) is the one the model handled better.
 - **No selection rule for the per-frame model.** Best-val picked a lunge-heavy checkpoint
   twice (window seed 8 → 52%, per-frame seed 7 → 49%, vs sweep averages 42%/31%). Val
   accuracy looks mildly ANTI-correlated with video behaviour. The ensemble sidesteps this
@@ -580,7 +603,73 @@ min(left,right) and so already picks the front knee during a lunge. Front-foot A
 30fps. Back-leg extension AUC 0.58 — the back knee is 177–178° in EVERY class including
 neutral and walking, so "more extended than before" is not recoverable from 2D pose.
 
-### Next step — ground-truth labels (blocking)
+**Demo framing bug, FIXED (2026-08-02).** `MIN_BOX_H_FRAC` was 0.35, tuned on bout 2 where
+fencers fill 0.30-0.60 of frame height. Bout 1 frames them at 0.20-0.50 (median box 0.360),
+so the filter discarded **44% of real detections** and fencers went unlabelled for stretches
+(one slot down to 27% coverage). Now 0.25, calibrated not guessed: bout 2's banner-graphic
+detections top out at 0.20 and its real fencers start at 0.30, leaving an empty gap. Coverage
+90% → 99%. Lesson: constants tuned on one video silently break another — check any threshold
+against BOTH bouts.
+
+**`parry` over-prediction is the MODEL, not the demo's fast-path (2026-08-02).** `parry` is
+the only FAST_CLASS, so a short 25-frame window scoring >=0.65 can override the 60-frame call,
+and that path can only ADD parries. Measured properly by disabling it: it contributes 16 of
+fencer A's 68 parry calls and 5 of B's 22 — about a quarter. The rest come from the long
+window. A confidence guard (short may not overrule a more-confident long) is in place but
+removes only ~4 calls; short windows are systematically more confident than long ones, so it
+rarely triggers. **Do not tune the demo for this** — parry has exactly one feature and the
+fix is upstream.
+*Method note:* a first diagnostic claimed 87% of parries came via the override. It stubbed
+camera pan to ZERO, which shifted long-window confidences and inverted the conclusion. Any
+replay of the demo loop must compute pan the same way the demo does, or its numbers are junk.
+
+**`advance` vs `neutral` on small advances (open).** Aaron: fencer B's *small* advances read
+`neutral`. Consistent with the features — a small advance keeps a narrow stance and shallow
+crouch, which is the neutral profile, so only world-motion separates "small step" from
+"standing". Windows called neutral vs advance for B: stance 0.25 vs 0.56, crouch 0.44 vs 0.61.
+Not obviously fixable in code; needs labelled small-advance examples or a sharper world-motion
+signal.
+
+## FIRST REAL EVALUATION (2026-08-04) — ground truth exists now
+
+Aaron labelled `data/raw_video/1.mp4` (FIE Worlds Hong Kong, DOSA vs CHOUPENITCH, 104 s) as
+intervals; see `data/labels/bout1_intervals.csv`. 793 windows fall inside labelled time.
+Scored with `scratchpad/evaluate.py`, which reuses demo_video's own functions (a reimplemented
+loop got pan wrong once and inverted a conclusion — never reimplement it).
+
+**Overall raw accuracy 19.0%. Random is 16.7%.** The model is barely above chance on
+continuous footage, against ~86% on held-out clips. Every clip-based number in this file
+should be read in that light.
+
+| class | n_true | precision | recall |
+|---|---|---|---|
+| advance | 151 | 15% | **5%** |
+| lunge | 21 | **3%** | 57% |
+| neutral | 191 | 28% | 5% |
+| parry | 8 | 2% | 12% |
+| retreat | 78 | 33% | **73%** |
+| walking | 344 | 53% | 19% |
+
+- **`lunge` is a default, not a class.** 21 true windows; predicted **371 times**. It swallows
+  advance (122 of 151), walking (155), neutral (70). Fixing lunge over-prediction is THE task.
+- **`advance` → `lunge` on 81% of true advances.** Confirms what Aaron saw by eye.
+- **`retreat` works** (73% recall) — so direction itself is learnable; the failure is specific.
+- **A/B ASYMMETRY SOLVED — it was never the fencer.** A 10.4% vs B 27.2%, and the labels show
+  A advances while B retreats in nearly every exchange. A scores badly because `advance` is
+  broken, B well because `retreat` works. Mirroring, pose quality, facing coverage and
+  handedness all came back negative because they were the wrong question.
+
+*Scoring note:* the "viewer sees" variant counts `ready` as wrong when truth is
+neutral/walking, but `ready` is the INTENDED render for QUIET_CLASSES. That number (7.3%) is
+a scoring artifact; fix the scorer before quoting it.
+
+### Next step — more labels, and fix lunge
+
+The blocking task is no longer "get labels" — it is **fix `lunge` over-prediction**, now
+measurable. 104 s gives only 21 true lunge and 8 parry windows, so those two rows are thin;
+another 2-3 minutes of labelled footage would firm them up and is the cheapest next step.
+
+### Older note — ground-truth labels (was blocking, now partly done)
 
 Everything above is measured on hand-trimmed clips, and three separate metrics have now
 lied because of that. The unblocking task is **INTERVAL labels on continuous footage**:

@@ -1,0 +1,64 @@
+# Ground-truth interval labels for data/raw_video/1.mp4
+# (FIE World Championships Hong Kong 2026, DOSA vs CHOUPENITCH; 104.0 s, 29.97 fps)
+# Timestamps are seconds from the START of that file. Aaron, 2026-08-02.
+# Verified aligned by frame check: t=19.9 both lunging, t=28.0 left advances /
+# right retreats, t=85.8 left lunge / right parry. NOT "Bout #1 without break".
+# fencer: left = screen-left (demo slot A), right = screen-right (demo slot B)
+# "with pause" in the source table = overall direction holds but small opposite
+# steps interrupt it; scored as the overall direction (advance / retreat).
+# Uncovered time is deliberately absent and is EXCLUDED from scoring, not counted
+# as neutral.
+fencer,start,end,label
+left,0.000,5.138,neutral
+right,0.000,5.138,neutral
+left,5.138,6.500,advance
+right,5.138,6.500,advance
+left,6.500,8.441,advance
+right,6.500,8.441,retreat
+left,9.209,14.514,walking
+right,9.209,14.514,walking
+left,14.514,16.583,neutral
+right,14.514,16.583,neutral
+left,16.583,17.650,advance
+right,16.583,17.650,advance
+left,17.650,19.519,advance
+right,17.650,19.519,retreat
+left,19.519,20.486,lunge
+right,19.519,20.486,lunge
+left,20.486,23.523,walking
+right,20.486,23.523,walking
+left,23.523,25.759,neutral
+right,23.523,25.759,neutral
+left,25.759,26.993,advance
+right,25.759,26.993,advance
+left,26.993,29.562,advance
+right,26.993,29.562,retreat
+left,29.562,30.397,lunge
+right,29.562,30.397,parry
+left,30.397,34.033,walking
+right,30.397,34.033,walking
+left,38.104,42.842,neutral
+right,38.104,42.842,neutral
+left,42.842,43.843,advance
+right,42.842,43.843,advance
+left,43.843,50.383,advance
+right,43.843,50.383,retreat
+left,52.619,72.870,walking
+right,52.619,72.870,walking
+left,82.849,84.918,neutral
+right,82.849,84.918,neutral
+left,84.918,85.585,advance
+right,84.918,85.585,advance
+left,85.585,86.066,lunge
+right,85.585,86.066,parry
+left,86.850,88.855,walking
+right,86.850,88.855,walking
+left,88.855,90.957,neutral
+right,88.855,90.957,neutral
+left,90.957,94.149,advance
+right,90.957,94.149,retreat
+left,94.149,94.861,lunge
+left,95.150,98.350,walking
+right,95.150,98.350,walking
+left,102.035,104.003,neutral
+right,102.035,104.003,neutral
