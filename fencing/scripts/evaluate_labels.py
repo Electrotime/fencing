@@ -49,6 +49,38 @@ with open(LABELS) as f:
             (float(row["start"]), float(row["end"]), row["label"].strip()))
 
 
+def long_window_probs(model, track):
+    """Full class-probability vector for the track's LONG window, or None.
+
+    Mirrors demo_video._classify_window's preprocessing exactly (same gates, same
+    lengths handling) but returns the whole distribution rather than the argmax,
+    which is what prior-correction experiments need.
+    """
+    kp_seq = np.stack(track.kp)[-D.WINDOW_LONG:]
+    mot = np.array(track.motion, dtype=np.float32)[-D.WINDOW_LONG:]
+    real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)
+    if real.sum() < D.MIN_REAL_FRAMES:
+        return None
+    kp = kp_seq[np.argmax(real):]
+    if len(kp) >= 2:
+        step = np.linalg.norm(np.diff(kp[:, :, :2], axis=0), axis=2)
+        if float(np.mean(step < 1e-9)) > D.MAX_FROZEN_FRAC:
+            return None
+    norm = D._normalize_sequence(kp)
+    agg = D._engineered_features(norm, mot)
+    flat = norm.reshape(len(norm), -1).astype(np.float32)
+    n_real = min(len(flat), D.SEQ_LEN)
+    if len(flat) < D.SEQ_LEN:
+        flat = np.concatenate([flat, np.zeros((D.SEQ_LEN - len(flat), D.INPUT_SIZE), np.float32)])
+    lengths = torch.tensor([n_real])
+    with torch.no_grad():
+        logits = model(torch.from_numpy(flat[:D.SEQ_LEN])[None],
+                       torch.from_numpy(agg)[None], lengths)
+        if logits.ndim == 3:
+            logits = D.frame_logits_to_window(logits, lengths, mode="last")
+        return torch.softmax(logits, dim=1)[0].numpy()
+
+
 def truth_at(slot, t):
     for s, e, lab in truth[slot]:
         if s <= t < e:
@@ -70,6 +102,7 @@ landmarkers = {s: _make_landmarker(mp.tasks.vision.RunningMode.VIDEO).__enter__(
                for s in ("A", "B")}
 prev_gray, pan_windows = None, {}
 preds = []          # (slot, time, raw_label, shown_label)
+prob_rows = []      # (slot, time, prob_vector) -- cached for offline experiments
 frame_idx = 0
 
 while True:
@@ -113,11 +146,24 @@ while True:
                 shown = ("ready" if (t.label in D.QUIET_CLASSES
                                      or t.conf < D.ACTION_CONF_FLOOR) else t.label)
                 preds.append((slot, frame_idx / fps, t.label, shown))
+                # cache the full LONG-window probability vector so prior-correction
+                # and threshold experiments run offline instead of re-running this
+                # 5-minute loop. Safe to compute here: the track already carries the
+                # properly-estimated pan, so nothing is being recomputed.
+                p = long_window_probs(action_model, t)
+                if p is not None:
+                    prob_rows.append((slot, frame_idx / fps, p))
     frame_idx += 1
 
 cap.release()
-for s in landmarkers.values():
-    s.__exit__(None, None, None)
+for s_ in landmarkers.values():
+    s_.__exit__(None, None, None)
+
+np.savez(PROJECT / "data" / "labels" / "bout1_probs.npz",
+         slot=np.array([r[0] for r in prob_rows]),
+         time=np.array([r[1] for r in prob_rows], dtype=np.float32),
+         probs=np.stack([r[2] for r in prob_rows]))
+print(f"cached {len(prob_rows)} probability vectors for offline analysis\n")
 
 # ---- score -----------------------------------------------------------------
 pairs = [(s, truth_at(s, t), raw, shown) for s, t, raw, shown in preds

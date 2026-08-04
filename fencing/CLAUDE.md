@@ -663,6 +663,44 @@ should be read in that light.
 neutral/walking, but `ready` is the INTENDED render for QUIET_CLASSES. That number (7.3%) is
 a scoring artifact; fix the scorer before quoting it.
 
+### FIXED — class-prior correction (2026-08-04): 19.0% → ~42%
+
+Root cause of `lunge` eating everything: **prior mismatch, not a broken feature.** Clips were
+cut OF actions, so the corpus over-represents them (lunge 10% of training windows vs 2.6% of
+real footage, parry 10% vs 1.0%), and inverse-frequency class weighting then drives the
+model's effective prior to UNIFORM. It expected lunge ~6x too often, so lunge stopped being a
+class and became a default.
+
+Fix is standard label shift, applied in `demo_video._classify_window`:
+`p(c|x) * CLASS_PRIOR(c) / train_prior(c)`, and since the train prior is uniform it drops out
+of the renormalisation. `APPLY_CLASS_PRIOR = False` disables it for measurement.
+
+| class | before | after (held-out) |
+|---|---|---|
+| advance | 15% / **5%** | 53% / **67%** |
+| walking | 54% / 19% | 54% / **49%** |
+| retreat | 32% / 73% | 28% / 60% |
+| neutral | 28% / 5% | 33% / 8% |
+| lunge | 3% / 57% | 0% / 0% |
+| overall | **19.0%** | **41.9%** |
+
+**Quote 41.9%, not 50.2%.** The 50.2% you get by running `evaluate_labels.py` as shipped uses
+a prior fitted on the same footage it scores. 41.9% is honest: prior fitted on one half of the
+labelled bout, scored on the other, both directions agreeing (15.7%→42.6%, 22.6%→41.2%).
+
+Notes:
+- `lunge` going to 0% is not a regression. Its old "57% recall" came with 3% precision off 378
+  predictions for 21 true windows — it was never working, the correction just stops it being
+  the default. 21 windows is too thin to tell whether lunge is recoverable.
+- `neutral` is still weak (8%), leaking mostly to `walking` — the benign confusion (both mean
+  "no priority action").
+- **EM prior estimation does NOT work here** (Saerens et al., needs no labels). It estimated
+  lunge at 0.635 against a true 0.027 and made things worse, 19.2% → 14.6%: the classifier is
+  biased enough that EM just confirms its own error. So the prior must come from labelled
+  footage, not be inferred at runtime.
+- The prior is from ONE 104 s bout. Re-estimate as more is labelled, and re-check it transfers
+  — a bout with more stoppage time would shift walking/neutral.
+
 ### Next step — more labels, and fix lunge
 
 The blocking task is no longer "get labels" — it is **fix `lunge` over-prediction**, now

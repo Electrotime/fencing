@@ -56,6 +56,23 @@ FAST_CONF = 0.65           # a short-window override has to be at least this sur
 # neutral/walking exist -- labels only light up when something real happens)
 QUIET_CLASSES = {"neutral", "walking"}
 ACTION_CONF_FLOOR = 0.50   # below this the call is too unsure to show as an action
+# How often each class actually occurs in continuous footage, measured from
+# data/labels/bout1_intervals.csv (787 labelled windows). The model is trained with
+# inverse-frequency class weighting, which drives its effective prior to UNIFORM
+# (16.7% each) -- but real fencing is nothing like uniform, and the clip corpus
+# over-represents the exciting classes because clips were cut OF actions
+# (lunge 10% of training windows vs 2.6% of reality, parry 10% vs 1.0%).
+# Untreated, `lunge` stops behaving like a class and becomes a default: 21 true
+# windows, predicted 378 times, swallowing 122 of 151 real advances.
+# Correcting for it is standard label-shift: p(c|x) * target_prior / train_prior.
+# Validated by fitting the prior on one half of the labelled footage and scoring
+# the other (both directions): 15.7%->42.6% and 22.6%->41.2%. Per class, advance
+# goes 5%->67% recall. NOTE this is one 104 s bout; re-estimate as more footage is
+# labelled, and set APPLY_CLASS_PRIOR=False to measure without it.
+APPLY_CLASS_PRIOR = True
+CLASS_PRIOR = {"advance": 0.192, "lunge": 0.027, "parry": 0.010,
+               "retreat": 0.099, "neutral": 0.243, "walking": 0.429}
+
 MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps are
                         # exactly zero, i.e. held over from the previous frame by the
                         # visibility fallback. Partial/occluded bodies were producing
@@ -186,6 +203,14 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
             # assumption this model exists to avoid.
             logits = frame_logits_to_window(logits, lengths, mode="last")
         probs = torch.softmax(logits, dim=1)[0]
+
+    if APPLY_CLASS_PRIOR:
+        # train prior is uniform (inverse-frequency weighting), so dividing by it is
+        # a constant and drops out of the renormalisation -- only the target matters
+        w = torch.tensor([CLASS_PRIOR[c] for c in CLASS_NAMES], dtype=probs.dtype)
+        probs = probs * w
+        probs = probs / probs.sum().clamp(min=1e-12)
+
     idx = int(probs.argmax())
     return CLASS_NAMES[idx], float(probs[idx])
 
