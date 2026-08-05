@@ -1,0 +1,57 @@
+# Ground-truth interval labels for data/raw_video/2.mp4. Aaron, 2026-08-05.
+# Timestamps are seconds from the START of that file.
+# "with pause" = overall direction holds but small opposite steps interrupt it;
+# scored as the overall direction.
+# "arm extension" is NOT one of the six classes (extension was dropped and lives
+# on as the arm-reach FEATURE), so those intervals are marked `extension` and are
+# EXCLUDED from scoring — the model can never emit that label and penalising it
+# would be measuring the wrong thing. Count them, don't score them.
+# NOTE: roles are REVERSED vs bout 1 — here A retreats and B advances in the
+# opening exchanges. That makes this a real test of the claim that the old "A/B
+# asymmetry" was about which ACTIONS a fencer performs, not which slot they are.
+# Uncovered time is deliberately absent and excluded from scoring.
+fencer,start,end,label
+left,0.000,1.701,neutral
+right,0.000,1.701,neutral
+left,2.402,6.772,retreat
+right,2.402,6.772,advance
+left,6.773,7.540,parry
+right,6.773,7.540,lunge
+left,7.540,10.210,advance
+right,7.540,10.210,retreat
+left,10.210,10.743,parry
+right,10.210,10.743,lunge
+left,10.844,11.978,walking
+right,10.844,11.978,walking
+left,27.327,28.628,neutral
+right,27.327,28.628,neutral
+left,29.595,30.130,advance
+right,29.595,30.130,retreat
+left,30.130,31.264,advance
+right,30.130,31.264,extension
+left,31.264,32.031,lunge
+right,31.264,32.031,lunge
+left,48.415,50.483,walking
+right,48.415,50.483,walking
+left,52.786,53.119,retreat
+right,52.786,53.119,advance
+left,53.119,53.786,retreat
+right,53.119,53.786,lunge
+left,55.321,58.458,walking
+right,55.321,58.458,walking
+left,63.430,64.097,parry
+right,63.430,64.097,lunge
+left,91.390,92.657,advance
+right,91.390,92.657,retreat
+left,92.657,93.457,advance
+right,92.657,93.457,extension
+left,93.457,94.124,advance
+right,93.457,94.124,retreat
+left,94.124,95.825,advance
+right,94.124,95.825,extension
+left,97.097,97.730,lunge
+right,97.097,97.730,lunge
+left,104.737,106.573,neutral
+right,104.737,106.573,neutral
+left,108.675,109.175,parry
+right,108.675,109.175,lunge

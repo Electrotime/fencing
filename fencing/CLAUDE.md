@@ -701,7 +701,78 @@ Notes:
 - The prior is from ONE 104 s bout. Re-estimate as more is labelled, and re-check it transfers
   — a bout with more stoppage time would shift walking/neutral.
 
-### Next step — more labels, and fix lunge
+### TRANSFER CONFIRMED (2026-08-05) — second labelled bout, `data/raw_video/2.mp4`
+
+`data/labels/bout2_intervals.csv` (ONO vs ITKIN, 110.9 s, 254 scored windows). Prior fitted on
+bout 1, applied unchanged to a different match and different fencers — a true held-out test.
+
+| | bout 1 (held-out prior) | bout 2 (bout-1 prior) |
+|---|---|---|
+| overall | 41.9% | **43.3%** |
+| advance | 53% / 67% | **69% / 70%** |
+| lunge | 0% / 0% | **50% / 19%** |
+| walking | 54% / 49% | 40% / 55% |
+| retreat | 28% / 60% | 38% / 35% |
+| neutral | 33% / 8% | 38% / 12% |
+| parry | 0% / 0% | 3% / 7% |
+
+- **The prior generalises.** 43.3% on an unseen match vs 41.9% held-out within bout 1. It is
+  not fitted to one match's stoppage pattern.
+- **`advance` is now usable** at 69/70 — the class that was 15%/5% before the correction.
+- **`lunge` is NOT dead.** Its 0% on bout 1 was 21 windows of thin data; on 31 windows here it
+  reaches 50% precision.
+- **`parry` is now the dominant error and it took over lunge's old role.** Predicted ~37 times
+  for 1 correct, and it eats `retreat`: 22 of 54 true retreat windows are called parry, which
+  is what drags retreat recall to 35%. Fixing parry is the next lever.
+- **A/B asymmetry, final form.** Bout 2 REVERSES the footwork roles (A retreats, B advances)
+  yet A is still worse (32.4% vs 56.5%) — because in bout 2 fencer A performs all four parry
+  sequences, and parry is the worst class. Per-fencer accuracy tracks WHICH ACTIONS that
+  fencer performs, not the slot, not the fencer, not handedness. A simply drew the hard
+  actions in both bouts.
+- `extension` appears in bout 2's labels; it is not one of the six classes (it is the arm-reach
+  FEATURE), so `evaluate_labels.py` counts and EXCLUDES those windows (22 here) rather than
+  penalising the model for a label it cannot emit.
+
+Run either bout: `py -3 scripts/evaluate_labels.py <video.mp4> <labels.csv>`
+
+**PRIOR TRANSFER IS ASYMMETRIC — correcting an earlier over-claim.** "The prior generalises"
+was based on one direction only. Measured both ways (uniform / bout1-prior / bout2-prior /
+pooled, scored on each bout):
+
+| prior | bout 1 | bout 2 |
+|---|---|---|
+| none (uniform) | 19.2% | **46.1%** |
+| bout 1 | 50.2%* | 43.3% |
+| bout 2 | **24.4%** | 47.2%* |
+| pooled (shipped) | 45.9% | 44.1% |
+
+(*circular — that prior saw that bout.) Bout 1 is idle-heavy (walking 0.457), bout 2
+action-dense (walking 0.232). A prior lifted from busy footage under-weights walking and
+wrecks quiet footage (24.4%). Note bout 2 scores 46.1% with NO correction, because its true
+distribution is already near uniform — the correction's value depends on the footage. Pooled
+is shipped as the most balanced. Re-derive with `scripts/estimate_class_prior.py`.
+
+**PARRY IS A SCHEMA PROBLEM, NOT (mainly) A MODEL FAILURE (2026-08-05).** Aaron: "when
+parrying, retreating is super duper common." Confirmed — the `retreat`→`parry` confusions
+cluster on real parries, the correct `retreat` calls do not:
+
+| true=retreat, predicted | dist. to nearest labelled parry | within 3 s |
+|---|---|---|
+| **parry** (22 windows) | median **2.35 s** | **68%** |
+| retreat (19 windows) | median 999 s (none nearby) | 16% |
+
+Cross-check: fencer B has 4 retreat intervals and ZERO parries, and scores 56.5% vs A's 32.4%
+— A is the one parrying. So the model is detecting real blade action during retreat sequences
+and the single-label schema scores it wrong whatever it says.
+**The classes are not mutually exclusive.** They are two near-orthogonal tracks:
+- FOOTWORK (legs): advance / retreat / lunge / walking / neutral
+- BLADE (arm): parry / extension / none
+A fencer parries WHILE retreating. This is why parry has been the worst class since the start
+and why no feature or architecture fix ever moved it. Do not try to suppress parry; the fix is
+to label and predict the two tracks separately (and it lines up with Phase 5, which already
+needs blade action and footwork independently for priority).
+
+### Next step — two-track labels, then parry
 
 The blocking task is no longer "get labels" — it is **fix `lunge` over-prediction**, now
 measurable. 104 s gives only 21 true lunge and 8 parry windows, so those two rows are thin;

@@ -37,8 +37,16 @@ from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD, _landmarks_to_array,
                                _make_landmarker)
 
-VIDEO = PROJECT / "data" / "raw_video" / "1.mp4"   # verified aligned to the labels
-LABELS = PROJECT / "data" / "labels" / "bout1_intervals.csv"
+# usage: py -3 scripts/evaluate_labels.py [video.mp4] [labels.csv]
+_args = [a for a in sys.argv[1:]]
+VIDEO = Path(_args[0]) if _args else PROJECT / "data" / "raw_video" / "1.mp4"
+LABELS = (Path(_args[1]) if len(_args) > 1
+          else PROJECT / "data" / "labels" / "bout1_intervals.csv")
+CACHE_OUT = PROJECT / "data" / "labels" / f"{VIDEO.stem}_probs.npz"
+# `extension` is not one of the six classes (it lives on as the arm-reach FEATURE),
+# so the model can never emit it; scoring those windows would measure the wrong
+# thing. Counted and excluded.
+UNSCORABLE = {"extension"}
 SLOT_OF = {"left": "A", "right": "B"}
 
 # ---- ground truth ----------------------------------------------------------
@@ -159,15 +167,20 @@ cap.release()
 for s_ in landmarkers.values():
     s_.__exit__(None, None, None)
 
-np.savez(PROJECT / "data" / "labels" / "bout1_probs.npz",
+np.savez(CACHE_OUT,
          slot=np.array([r[0] for r in prob_rows]),
          time=np.array([r[1] for r in prob_rows], dtype=np.float32),
          probs=np.stack([r[2] for r in prob_rows]))
 print(f"cached {len(prob_rows)} probability vectors for offline analysis\n")
 
 # ---- score -----------------------------------------------------------------
-pairs = [(s, truth_at(s, t), raw, shown) for s, t, raw, shown in preds
-         if truth_at(s, t) is not None]
+_scored = [(s, truth_at(s, t), raw, shown) for s, t, raw, shown in preds
+           if truth_at(s, t) is not None]
+n_unscorable = sum(1 for p in _scored if p[1] in UNSCORABLE)
+pairs = [p for p in _scored if p[1] not in UNSCORABLE]
+if n_unscorable:
+    print(f"excluded {n_unscorable} windows labelled {sorted(UNSCORABLE)} "
+          f"(not predictable classes)")
 print(f"{len(preds)} predictions, {len(pairs)} inside labelled time\n")
 
 for scope in ("RAW model call", "WHAT THE VIEWER SEES"):

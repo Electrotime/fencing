@@ -70,8 +70,21 @@ ACTION_CONF_FLOOR = 0.50   # below this the call is too unsure to show as an act
 # goes 5%->67% recall. NOTE this is one 104 s bout; re-estimate as more footage is
 # labelled, and set APPLY_CLASS_PRIOR=False to measure without it.
 APPLY_CLASS_PRIOR = True
-CLASS_PRIOR = {"advance": 0.192, "lunge": 0.027, "parry": 0.010,
-               "retreat": 0.099, "neutral": 0.243, "walking": 0.429}
+# Pooled duration shares from BOTH labelled bouts (218 s). Re-derive with
+# scripts/estimate_class_prior.py whenever more footage is labelled.
+CLASS_PRIOR = {"advance": 0.184, "lunge": 0.045, "parry": 0.017,
+               "retreat": 0.122, "neutral": 0.230, "walking": 0.401}
+# Transfer is ASYMMETRIC and the prior is NOT universal. Measured:
+#            bout1   bout2
+#   uniform  19.2%   46.1%     bout2 needs little correction -- it is action-dense
+#   bout1     50.2%*  43.3%    (*circular) transfers forward fine
+#   bout2     24.4%   47.2%*   transfers BADLY backward: under-weights walking
+#   pooled    45.9%   44.1%    most balanced, hence shipped
+# Bout 1 is idle-heavy (walking 0.457) and bout 2 action-dense (walking 0.232), so
+# a prior lifted from busy footage wrecks quiet footage. If you analyse material
+# with very different action density, re-estimate. Unsupervised EM estimation does
+# NOT work here (it put lunge at 0.635 vs a true 0.027) -- the prior has to come
+# from labels.
 
 MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps are
                         # exactly zero, i.e. held over from the previous frame by the
