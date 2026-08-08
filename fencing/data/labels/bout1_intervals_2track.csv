@@ -1,0 +1,67 @@
+# Ground-truth interval labels for data/raw_video/1.mp4
+# (FIE World Championships Hong Kong 2026, DOSA vs CHOUPENITCH; 104.0 s, 29.97 fps)
+# Timestamps are seconds from the START of that file. Aaron, 2026-08-02.
+# Verified aligned by frame check: t=19.9 both lunging, t=28.0 left advances /
+# right retreats, t=85.8 left lunge / right parry. NOT "Bout #1 without break".
+# fencer: left = screen-left (demo slot A), right = screen-right (demo slot B)
+# "with pause" in the source table = overall direction holds but small opposite
+# steps interrupt it; scored as the overall direction (advance / retreat).
+# Uncovered time is deliberately absent and is EXCLUDED from scoring, not counted
+# as neutral.
+# UPGRADED to two-track by scripts/upgrade_labels.py.
+# TODO cells could not be derived from the single-track label and need
+# a human -- see that script's docstring for why each one is unknown.
+fencer,start,end,footwork,blade
+left,0.000,5.138,neutral,none
+right,0.000,5.138,neutral,none
+left,5.138,6.500,advance,TODO
+right,5.138,6.500,advance,TODO
+left,6.500,8.441,advance,TODO
+right,6.500,8.441,retreat,TODO
+left,9.209,14.514,walking,none
+right,9.209,14.514,walking,none
+left,14.514,16.583,neutral,none
+right,14.514,16.583,neutral,none
+left,16.583,17.650,advance,TODO
+right,16.583,17.650,advance,TODO
+left,17.650,19.519,advance,TODO
+right,17.650,19.519,retreat,TODO
+left,19.519,20.486,lunge,TODO
+right,19.519,20.486,lunge,TODO
+left,20.486,23.523,walking,none
+right,20.486,23.523,walking,none
+left,23.523,25.759,neutral,none
+right,23.523,25.759,neutral,none
+left,25.759,26.993,advance,TODO
+right,25.759,26.993,advance,TODO
+left,26.993,29.562,advance,TODO
+right,26.993,29.562,retreat,TODO
+left,29.562,30.397,lunge,TODO
+right,29.562,30.397,TODO,parry
+left,30.397,34.033,walking,none
+right,30.397,34.033,walking,none
+left,38.104,42.842,neutral,none
+right,38.104,42.842,neutral,none
+left,42.842,43.843,advance,TODO
+right,42.842,43.843,advance,TODO
+left,43.843,50.383,advance,TODO
+right,43.843,50.383,retreat,TODO
+left,52.619,72.870,walking,none
+right,52.619,72.870,walking,none
+left,82.849,84.918,neutral,none
+right,82.849,84.918,neutral,none
+left,84.918,85.585,advance,TODO
+right,84.918,85.585,advance,TODO
+left,85.585,86.066,lunge,TODO
+right,85.585,86.066,TODO,parry
+left,86.850,88.855,walking,none
+right,86.850,88.855,walking,none
+left,88.855,90.957,neutral,none
+right,88.855,90.957,neutral,none
+left,90.957,94.149,advance,TODO
+right,90.957,94.149,retreat,TODO
+left,94.149,94.861,lunge,TODO
+left,95.150,98.350,walking,none
+right,95.150,98.350,walking,none
+left,102.035,104.003,neutral,none
+right,102.035,104.003,neutral,none

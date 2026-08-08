@@ -756,14 +756,104 @@ is shipped as the most balanced. Re-derive with `scripts/estimate_class_prior.py
 parrying, retreating is super duper common." Confirmed — the `retreat`→`parry` confusions
 cluster on real parries, the correct `retreat` calls do not:
 
-| true=retreat, predicted | dist. to nearest labelled parry | within 3 s |
-|---|---|---|
-| **parry** (22 windows) | median **2.35 s** | **68%** |
-| retreat (19 windows) | median 999 s (none nearby) | 16% |
+**The numbers first cited for this were wrong twice over and are corrected here.** The
+original table reported "median 999 s" for correctly-called retreats — 999 was a SENTINEL
+written when that fencer had no parry anywhere to measure a distance to, so taking its median
+produced a duration that means nothing. And the counts came from the pre-silhouette-filter
+detector. Recomputed on the current pipeline, separating "no parry exists" from a real
+distance:
 
-Cross-check: fencer B has 4 retreat intervals and ZERO parries, and scores 56.5% vs A's 32.4%
-— A is the one parrying. So the model is detecting real blade action during retreat sequences
-and the single-label schema scores it wrong whatever it says.
+| bout | model said (truth = retreat) | n | fencer has NO parry | median dist. | within 3 s |
+|---|---|---|---|---|---|
+| 1 | parry | **0** | — | — | — |
+| 1 | retreat | 62 | 0 | 15.15 s | 19% |
+| 2 | parry | 25 | 0 | **2.65 s** | **60%** |
+| 2 | retreat | 18 | **17** | — | — |
+
+Bout 1's 22 retreat→parry confusions are GONE after the detector fix. Bout 2's 25 do sit near
+real parries, but the control group is contaminated: 17 of the 18 correctly-called retreats
+belong to a fencer with no parries at all. So the contrast is largely BETWEEN FENCERS (the one
+who parries gets called parry) rather than between moments, which is much weaker support than
+was originally claimed.
+
+The schema argument does not depend on those numbers and still holds: a fencer genuinely
+parries WHILE retreating, and six mutually-exclusive classes cannot express both, so some
+windows are scored wrong whatever the model says.
+
+**BOUT 3 SETTLES IT: THE MODEL HAS NOT LEARNED PARRY AT ALL (2026-08-08).**
+`data/labels/bout3_intervals_2track.csv` — 44 intervals, action-hunted, **11 parries** against
+6 across bouts 1+2, and parries from BOTH fencers (left 6, right 5), which removes the
+per-fencer confound that made bout 2's evidence weak.
+
+First: **11 of 11 parries have `retreat` as their footwork.** Aaron's observation is not a
+tendency here, it is unanimous, and it is the cleanest possible justification for the
+two-track schema.
+
+But the schema is not what is blocking parry. Scored on 399 labelled windows:
+
+| | parry predictions | parry recall | overall |
+|---|---|---|---|
+| shipped CLASS_PRIOR | **0** | 0% | 42.1% |
+| no prior (uniform) | **0** | 0% | 35.3% |
+
+Zero either way, so the prior is not the cause. The raw parry output is near-noise:
+
+| | mean | median | max |
+|---|---|---|---|
+| true parry windows (55) | 0.037 | 0.038 | 0.106 |
+| everything else (344) | 0.031 | 0.027 | 0.121 |
+
+Parry never ranks #1 or #2 on ANY true-parry window (median rank #4 of 6); AUC 0.61.
+**Do not spend more effort on parry labels, priors, or thresholds** — none of them can move an
+output this uninformative. It needs either blade information the pose keypoints do not carry,
+or a window short enough not to average a 0.92 s action across 2.0 s.
+
+**Dead code path found by the same measurement:** `FAST_CLASSES = {"parry"}` lets the short
+window override the long one, but requires `short_conf > FAST_CONF = 0.65`. Parry probability
+maxes at 0.106. The one mechanism built specifically to rescue parry is unreachable by roughly
+6x and has likely never fired. Verify before removing or re-tuning it.
+
+**`advance` is now the default class.** 152 predictions for 60 true windows, swallowing 51 of
+64 lunges (lunge recall 9%). This is exactly the pathology `lunge` had before the prior
+correction, transplanted. Bout 3 is action-hunted so its true shares (advance 0.150, lunge
+0.160, parry 0.138) are nothing like real footage — do NOT pool it into CLASS_PRIOR — but the
+lunge→advance collapse is worth investigating on its own.
+
+Bout 3 overall 42.1% sits with bout 1's 42.9% and bout 2's 42.3%: the pipeline is consistent
+across three matches now.
+
+**POOLING IS THE BUG FOR TRANSIENT ACTIONS — lunge recall 9% -> 78% (2026-08-08).**
+`ActionLSTM` reduces its LSTM output with `out.mean(dim=1)` over all 60 frames, but a window
+is SCORED at its newest frame, so a 0.8 s lunge sits only at the recent end and gets averaged
+against up to 2 s of whatever preceded it. `ActionFrameLSTM` + `frame_logits_to_window(
+mode="last")` does not dilute. Scored standalone on bout 3 (`--frame-model`):
+
+| bout 3, raw | window model (mean-pooled) | per-frame model (last step) |
+|---|---|---|
+| **lunge** | 9% | **78%** |
+| advance | 82% | 8% |
+| retreat | 90% | 53% |
+| parry | 0% | **0%** |
+| overall | **42.1%** | 34.3% |
+
+The two are cleanly complementary and in exactly the direction the pooling argument predicts:
+mean-pool wins on SUSTAINED footwork, last-step wins on the SPIKE. This is what `FAST_CLASSES`
+was reaching for with the wrong mechanism — a short window of the same mean-pooled model,
+gated behind `FAST_CONF = 0.65` that parry's 0.106 max can never reach. **Next change: route
+lunge to the per-frame model.** Both models are already trained and on disk; no labels needed.
+Note the earlier finding that the per-frame model hurt inside the ENSEMBLE still stands — it
+is a router that is wanted here, not an average.
+
+**PARRY IS CLOSED.** 0% in both architectures, with 47 parry clips (more than advance's 35 or
+retreat's 33). Not a data problem, not a schema problem, not a prior problem, not a pooling
+problem. Do not spend more labelling on it.
+
+**On more interval labels:** they are NOT training data — the model trains only from
+`data/clips/`. 20 minutes of intervals would not reach the model at all as things stand. Where
+they WOULD pay: (1) a contiguous stretch of ORDINARY footage to firm up CLASS_PRIOR, which
+still transfers asymmetrically (bout2-prior -> bout1 = 24.4%); (2) training on continuous
+windows instead of hand-cut clips, which would end the clip-cutting artifact class that has
+produced three false results here.
 **The classes are not mutually exclusive.** They are two near-orthogonal tracks:
 - FOOTWORK (legs): advance / retreat / lunge / walking / neutral
 - BLADE (arm): parry / extension / none
@@ -772,11 +862,140 @@ and why no feature or architecture fix ever moved it. Do not try to suppress par
 to label and predict the two tracks separately (and it lines up with Phase 5, which already
 needs blade action and footwork independently for priority).
 
+**BLADE MOTION ENERGY instead of blade DETECTION (2026-08-05).** Aaron: "the problem with
+fast blades is that in the video sometimes it just disappears or it's only a blur." Right,
+and that kills the detector approach on its own terms — there is nothing sharp in those
+pixels, so more training frames cannot help. But blur is high frame-DIFFERENCE energy, so
+the property that breaks a detector is the one a motion measure wants.
+
+`scripts/blade_energy.py` measures mean/p99 frame-difference inside a box projected along
+the forearm (camera pan removed first; an equal-area TORSO box as control).
+`scripts/analyze_blade_energy.py` scores it. Coverage is the immediate win:
+**100% of tracked fencer-frames vs 1–2% for the detector.**
+
+**RESULT: as implemented, it does not work.** Parry vs non-blade AUC, per interval:
+
+| statistic | bout 2 (n=4 parries) | bout 1 (n=2) | **POOLED (n=6)** |
+|---|---|---|---|
+| box **mean**, blade/torso | 0.62 | 0.65 | **0.59** |
+| box **p99**, blade/torso | **0.70** | 0.49 | **0.55** |
+
+**This is the fourth time a metric here lied in the same way, and I walked into it live.**
+On bout 2 alone, p99 beat the mean 0.70 vs 0.62, and I wrote a confident mechanism into this
+file for why — a blade is a thin streak, averaging over a mostly-background box destroys it,
+p99 asks the right question. The mechanism is plausible and the number did not replicate:
+bout 1 gives p99 **0.49**, and pooled it is 0.55 versus the mean's 0.59. The reasoning was
+retrofitted to one sample of four. Neither statistic is distinguishable from chance.
+
+What survives:
+- **Coverage, which is real and large.** The blade box is measurable on **100%** of tracked
+  fencer-frames versus 1–2% for the detector. Whatever gets measured there, it gets measured
+  everywhere, which the detector can never do on blurred frames.
+- **The negative result itself** — this is cheap to have killed before wiring it into the
+  model. Compare `stance_ratio`: best AUC of any feature tried (0.91) and it still made the
+  model worse.
+
+Before retrying, the two things most likely to be wrong with the measurement (untested):
+the box is ~3× forearm long and mostly background/opponent, and pan compensation is a single
+global x-shift estimated at 320×180, which will not cancel parallax on a moving camera.
+
+This does NOT settle whether blade information helps — only that this measurement of it
+does not. And 6 parry intervals cannot settle anything either way, which is the concrete
+answer to "should I get more parry intervals": **yes, that is exactly what they resolve.**
+
+**THE REFEREE IS BEING TRACKED AS A FENCER — real, measured, and NOT yet fixed
+(2026-08-05).** Aaron: "in bout 1 the person detector was clipping onto the referee
+silhouette in the middle a lot." Confirmed. `get_fencer_boxes` resolves >2 people by keeping
+the **two highest-confidence** boxes, and on bout 1:
+
+- 68% of frames contain more than two tall people, so the tiebreak runs constantly
+- on **51% of those** it picks a different pair than horizontal separation would
+- the box it keeps and separation rejects sits at median **x = 0.49** (dead centre) with
+  median confidence **0.85**, displacing a real fencer at **0.71**; 64% are in the middle third
+
+The mechanism is clear: confidence measures *resemblance to a standing person*. A referee is
+still, upright and unoccluded; a fencer mid-lunge is blurred, horizontal and self-occluded.
+So confidence systematically prefers the referee. That is the opposite of what is wanted.
+
+**Two fixes were tried and BOTH made it worse.** Bout 1, RAW model call:
+
+| rule | overall | advance recall | retreat recall |
+|---|---|---|---|
+| top-2 by confidence (current) | **45.9%** | 50% | 64% |
+| all candidates → continuity via `_assign_boxes` | 35.7% | 11% | 13% |
+| top-4 by confidence → continuity | 35.8% | 11% | 13% |
+
+The second attempt tested the obvious explanation for the first — that removing the
+confidence gate let junk 0.4-confidence blobs win on distance — and it changed **nothing**
+(35.7 → 35.8). So the regression is in the assignment logic itself, not the candidate pool.
+Best remaining guess, untested: the >2 branch chose the pair minimising total distance to
+remembered hip positions with no left/right constraint and no hysteresis, so slots can swap
+frame to frame and shred the 60-frame window. Hip-x distance is too weak an association
+metric; this probably needs real IoU-based tracking rather than a nearest-centre rule.
+
+**THEN I LOOKED AT THE FRAMES, which I should have done first.** `scripts/inspect_detections.py`
+draws every tall detection on frames where the rules disagree (output in
+`data/diagnostics/<stem>_detections/`). A single frame settled what three experiments could not:
+
+| # | conf | x | height | what it actually is |
+|---|---|---|---|---|
+| 0 | 0.87 | 0.26 | 0.27 | left fencer |
+| 1 | **0.85** | 0.11 | 0.32 | **foreground spectator silhouette** |
+| 2 | 0.80 | 0.44 | **0.41** | the referee |
+| 3 | 0.65 | 0.71 | 0.32 | right fencer |
+
+The intruders are not only the referee, and they are **TALLER than the fencers** (0.32–0.41
+vs 0.26–0.27) because they stand between the camera and the piste — so `MIN_BOX_H_FRAC`
+cannot reach them, and raising it would delete the fencers first. Here the confidence rule
+keeps #0 and #1, **drops the right fencer entirely**, and sorts the remaining pair by x so
+the LEFT fencer lands in slot B. Slot B faces left, so net-forward inverts: that is the
+advance→retreat sign flip, visible directly.
+
+Two cues separate silhouettes from fencers, and **neither works alone** — over 1262 tall
+detections, boxes running to the frame bottom have median brightness 51 in bout 1 (vs 101
+for the rest) but 106 in bout 2, whose tighter framing puts real fencers' feet near the
+bottom edge. Together (dark AND bottom-anchored) they flag 16.2% of bout 1 and 4.1% of bout
+2 — the expected split, bout 1 being the wide shot. Fencers wear WHITE, which is what keeps
+them clear. Brightness is judged RELATIVE to the brightest box in frame, since an absolute
+cutoff also deletes a fencer in a dark patch and does not survive a change of venue.
+
+**The filter works and still costs accuracy.** Bout 1 / bout 2, RAW:
+
+| rule | bout 1 | bout 2 | bout 1 advance recall | windows scored (b1) |
+|---|---|---|---|---|
+| top-2 by confidence (shipped) | **45.9%** | **44.1%** | **50%** | 787 |
+| continuity / capped / widest-pair | 35.7 / 35.8 / 34.1% | — | 11% | — |
+| dark+bottom, absolute brightness | 42.4% | 42.3% | 40% | 874 |
+| dark+bottom, relative brightness | 42.9% | — | 40% | 874 |
+
+Coverage rises 11% (787→874 windows) because a silhouette in a slot produced a frozen
+skeleton that the `MAX_FROZEN_FRAC` gate suppressed; real fencers there produce real
+predictions. Total CORRECT calls go up (raw 361→371, viewer view 517→565) — accuracy falls
+because the newly-covered windows are hard ones. But **advance recall drops 50%→40% on
+essentially the same window set** (151→156), which coverage does not explain and I could not
+account for. Re-fitting the class prior against the new pipeline does not recover it
+(held-out 46.2% / 39.4%, ≈ the shipped prior's 42.4%).
+
+So: the bug is real, visually confirmed, and fixable — but every fix measured so far costs
+the headline metric. Worth suspecting that some tuning to date (prior, thresholds, gates)
+has quietly adapted to the broken detector, in which case the detector fix has to come with
+a re-tune rather than be judged on its own.
+
 ### Next step — two-track labels, then parry
 
-The blocking task is no longer "get labels" — it is **fix `lunge` over-prediction**, now
-measurable. 104 s gives only 21 true lunge and 8 parry windows, so those two rows are thin;
-another 2-3 minutes of labelled footage would firm them up and is the cheapest next step.
+1. **Two-track labels** (`fencer,start,end,footwork,blade`). Nothing downstream works
+   without them: a blade feature has no target while `parry` and `retreat` compete for one
+   slot. `scripts/upgrade_labels.py` lifts bouts 1–2 mechanically and writes `TODO` only
+   where it genuinely cannot infer (27 and 32 rows) rather than guessing.
+   `scripts/check_labels.py` validates either schema — catches overlapping intervals, which
+   silently mis-score because `truth_at()` returns the first match.
+2. **Blade p99 energy** as a feature, once there are enough parries to justify it.
+3. **Window length.** Interval durations across both bouts: parry median **0.60 s**, lunge
+   **0.69 s** (100% under 2 s), vs `WINDOW_LONG` = 60 frames = **2.0 s**, mean-pooled. An
+   18-frame parry is diluted across 60 frames that are mostly retreat. This may matter more
+   than any blade feature, and it is likely part of why lunge recall sits at 26% on bout 2
+   despite 57% precision. Footwork is a 1–3 s phenomenon and blade action a 0.5 s one; they
+   probably should not share a window length.
 
 ### Older note — ground-truth labels (was blocking, now partly done)
 

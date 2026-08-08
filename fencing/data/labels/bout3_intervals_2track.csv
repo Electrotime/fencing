@@ -1,0 +1,69 @@
+# Ground-truth interval labels for data/raw_video/3.mp4. Aaron, 2026-08-08.
+# TWO-TRACK schema: footwork and blade are separate columns, because the classes
+# were never mutually exclusive -- a fencer parries WHILE retreating, and under a
+# single label those two competed for one slot and parry always lost.
+#
+# Timestamps are seconds from the START of that file (source table was mm:ss.sss).
+# Column order in the source table was: time, LEFT footwork, LEFT blade,
+# RIGHT footwork, RIGHT blade.
+#
+# Rows where a fencer's FOOTWORK cell was blank are omitted for that fencer, per
+# Aaron. One casualty worth knowing about: at 88.036-88.737 the left fencer has
+# blade=parry with no footwork recorded, so that parry is not represented here.
+#
+# `arm ext` is recorded as `extension`. That is NOT one of the six model classes,
+# so evaluate_labels.py collapses these rows to the FOOTWORK label rather than to
+# `extension` -- otherwise ten of the fourteen lunges in this bout would be marked
+# unscorable and dropped.
+#
+# COVERAGE IS DELIBERATELY SPARSE and action-hunted: ~34 s of 152 s, lunge- and
+# parry-heavy by selection. Fine for per-class precision/recall, which excludes
+# unlabelled time. DO NOT pool this into CLASS_PRIOR -- the prior assumes labelled
+# time is a fair sample of the footage, and duration shares here describe where
+# Aaron looked. Folding it in would rebuild the exact bias that made `lunge` a
+# default class in the first place.
+fencer,start,end,footwork,blade
+left,0.000,2.135,advance,none
+right,0.000,2.135,advance,none
+left,2.668,3.468,lunge,extension
+right,2.668,3.468,retreat,parry
+left,14.280,15.347,lunge,extension
+right,14.280,15.347,retreat,parry
+right,17.249,17.850,lunge,extension
+left,47.250,49.118,walking,none
+right,47.250,49.118,neutral,none
+left,49.118,51.587,neutral,none
+right,49.118,51.587,neutral,none
+left,52.354,53.186,retreat,none
+right,52.354,53.186,lunge,extension
+left,54.417,58.821,advance,none
+right,54.417,58.821,retreat,none
+left,58.821,59.388,lunge,extension
+left,59.855,60.827,walking,none
+right,59.855,60.827,walking,none
+left,64.402,65.516,retreat,none
+right,64.402,65.516,advance,none
+right,65.516,66.150,lunge,none
+left,68.450,72.806,walking,none
+right,68.450,72.806,walking,none
+left,76.576,77.510,retreat,parry
+right,76.576,77.510,lunge,extension
+left,83.330,84.246,lunge,none
+right,83.330,84.246,retreat,parry
+right,88.036,88.737,lunge,extension
+right,88.737,89.157,retreat,parry
+left,91.114,94.627,walking,none
+right,91.114,94.627,walking,none
+left,99.566,103.837,retreat,none
+right,99.566,103.837,advance,none
+left,115.248,115.881,retreat,parry
+right,115.248,115.881,lunge,extension
+right,115.881,116.950,retreat,parry
+left,127.260,127.960,retreat,parry
+right,127.260,127.960,lunge,extension
+left,129.329,130.129,retreat,parry
+right,129.329,130.129,lunge,extension
+left,139.038,140.372,retreat,parry
+right,139.038,140.372,lunge,extension
+left,148.967,150.034,retreat,parry
+right,148.967,150.034,lunge,none

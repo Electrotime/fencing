@@ -31,3 +31,12 @@ fencing/data/clips/**/*.mp4
 fencing/data/clips/**/*.avi
 fencing/data/clips/**/*.mov
 fencing/data/clips/**/*.mkv
+
+# Per-frame blade-energy caches from scripts/blade_energy.py: ~5 min of CPU each
+# to rebuild, but fully derived from the video + code, and they change whenever
+# the box geometry does. (data/labels/*_probs.npz predate this rule and stay
+# tracked -- not untracking files that were deliberately committed.)
+fencing/data/labels/*_blade.npz
+
+# Annotated diagnostic frames from scripts/inspect_detections.py -- regenerable.
+fencing/data/diagnostics/

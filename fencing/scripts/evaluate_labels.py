@@ -32,17 +32,29 @@ sys.path.insert(0, str(PROJECT / "scripts"))
 import mediapipe as mp
 
 import demo_video as D
-from src.action_model import CLASS_NAMES, load_action_model
+from src.action_model import (ActionFrameLSTM, ActionLSTM, CLASS_NAMES,
+                              load_action_model)
 from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD, _landmarks_to_array,
                                _make_landmarker)
 
-# usage: py -3 scripts/evaluate_labels.py [video.mp4] [labels.csv]
-_args = [a for a in sys.argv[1:]]
+# usage: py -3 scripts/evaluate_labels.py [video.mp4] [labels.csv] [--frame-model]
+#
+# --frame-model scores models/action_frame.pth instead of the window model. Worth
+# a run specifically for the transient classes: the window model reduces its LSTM
+# output with `out.mean(dim=1)` over all 60 frames, while a window is SCORED at its
+# newest frame -- so a 0.92 s parry sits only at the recent end and gets averaged
+# against up to 2 s of whatever preceded it. The per-frame head is reduced with
+# frame_logits_to_window(mode="last"), which does not dilute. It is on record as
+# hurting inside the ENSEMBLE; it has never been scored standalone against interval
+# labels, which is a different question.
+_args = [a for a in sys.argv[1:] if not a.startswith("--")]
+USE_FRAME = "--frame-model" in sys.argv
 VIDEO = Path(_args[0]) if _args else PROJECT / "data" / "raw_video" / "1.mp4"
 LABELS = (Path(_args[1]) if len(_args) > 1
           else PROJECT / "data" / "labels" / "bout1_intervals.csv")
-CACHE_OUT = PROJECT / "data" / "labels" / f"{VIDEO.stem}_probs.npz"
+CACHE_OUT = (PROJECT / "data" / "labels" /
+             f"{VIDEO.stem}_probs{'_frame' if USE_FRAME else ''}.npz")
 # `extension` is not one of the six classes (it lives on as the arm-reach FEATURE),
 # so the model can never emit it; scoring those windows would measure the wrong
 # thing. Counted and excluded.
@@ -50,11 +62,44 @@ UNSCORABLE = {"extension"}
 SLOT_OF = {"left": "A", "right": "B"}
 
 # ---- ground truth ----------------------------------------------------------
+# Accepts both schemas. A TWO-TRACK file (fencer,start,end,footwork,blade) is
+# collapsed to one label with BLADE TAKING PRIORITY:
+#
+#     blade != none  ->  the blade label    (parry)
+#     otherwise      ->  the footwork label (retreat, advance, ...)
+#
+# The model has six mutually-exclusive classes and must pick one, so a collapse is
+# unavoidable until there is a second head. Blade-priority is the right collapse
+# for two reasons. It makes the convention CONSISTENT -- the same physical event
+# (parry while retreating) was previously written `parry` sometimes and `retreat`
+# other times, which is unlearnable noise rather than merely coarse labelling. And
+# it matches what the model already does: 22 retreat windows were called `parry`,
+# and they cluster on real parries (median 2.35 s away, 68% within 3 s) while
+# correctly-called retreats do not (median 999 s, 16%).
+#
+# Collapsing here rather than in the label file keeps the footwork column intact
+# on disk for the two-track model, so nothing has to be re-watched later.
+# Blade only wins if it is a label the MODEL CAN EMIT. `extension` is not one of
+# the six classes, so deferring to it would mark the window UNSCORABLE -- and in
+# bout 3 ten of fourteen lunges are written `lunge` + `arm ext`, so a naive
+# blade-priority collapse silently deleted almost every lunge from a bout labelled
+# specifically for its lunges. Fall through to footwork for anything unemittable.
+def _collapse(row, two_track):
+    if not two_track:
+        return row["label"].strip()
+    blade = row["blade"].strip()
+    return blade if blade in CLASS_NAMES else row["footwork"].strip()
+
+
 truth = defaultdict(list)          # slot -> [(start, end, label)]
-with open(LABELS) as f:
-    for row in csv.DictReader(r for r in f if not r.startswith("#")):
+with open(LABELS, encoding="utf-8") as f:
+    rdr = csv.DictReader(r for r in f if not r.startswith("#"))
+    two_track = "footwork" in (rdr.fieldnames or [])
+    for row in rdr:
         truth[SLOT_OF[row["fencer"]]].append(
-            (float(row["start"]), float(row["end"]), row["label"].strip()))
+            (float(row["start"]), float(row["end"]), _collapse(row, two_track)))
+print(f"labels: {LABELS.name} "
+      f"({'two-track, blade-priority collapse' if two_track else 'single-track'})")
 
 
 def long_window_probs(model, track):
@@ -98,8 +143,11 @@ def truth_at(slot, t):
 
 # ---- run the demo pipeline -------------------------------------------------
 person_model = load_person_model()
-action_model = load_action_model(PROJECT / "models" / "action_lstm.pth",
-                                 device=torch.device("cpu"))
+action_model = load_action_model(
+    PROJECT / "models" / ("action_frame.pth" if USE_FRAME else "action_lstm.pth"),
+    device=torch.device("cpu"),
+    cls=ActionFrameLSTM if USE_FRAME else ActionLSTM)
+print(f"model: {'action_frame.pth (per-frame, last-step reduction)' if USE_FRAME else 'action_lstm.pth (window, mean-pooled)'}")
 cap = cv2.VideoCapture(str(VIDEO))
 fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -114,6 +162,7 @@ prob_rows = []      # (slot, time, prob_vector) -- cached for offline experiment
 frame_idx = 0
 
 while True:
+    
     ok, frame = cap.read()
     if not ok:
         break
@@ -186,10 +235,19 @@ print(f"{len(preds)} predictions, {len(pairs)} inside labelled time\n")
 for scope in ("RAW model call", "WHAT THE VIEWER SEES"):
     idx = 2 if scope == "RAW model call" else 3
     print(f"=== {scope} ===")
-    labels = sorted({p[1] for p in pairs} | {p[idx] for p in pairs})
+    # The overlay deliberately collapses neutral/walking to "ready" -- that is the
+    # display saying "no action", which is CORRECT when the truth is neutral or
+    # walking. Comparing that against the raw truth vocabulary scored every such
+    # window as a miss, measuring the overlay's WORDING rather than the model. So
+    # for this view the truth is mapped into the same vocabulary the display uses.
+    def as_shown(c):
+        return "ready" if (idx == 3 and c in D.QUIET_CLASSES) else c
+
+    scored = [(as_shown(gt), raw if idx == 2 else shown)
+              for _, gt, raw, shown in pairs]
+    labels = sorted({g for g, _ in scored} | {p for _, p in scored})
     tp = Counter(); fp = Counter(); fn = Counter()
-    for _, gt, raw, shown in pairs:
-        pr = raw if idx == 2 else shown
+    for gt, pr in scored:
         if pr == gt:
             tp[gt] += 1
         else:
@@ -199,7 +257,7 @@ for scope in ("RAW model call", "WHAT THE VIEWER SEES"):
     print(f"  overall accuracy {acc:.1%}")
     print(f"  {'class':<10}{'n_true':>8}{'precision':>11}{'recall':>9}")
     for c in labels:
-        n_true = sum(1 for _, gt, _, _ in pairs if gt == c)
+        n_true = sum(1 for gt, _ in scored if gt == c)
         p = tp[c] / (tp[c] + fp[c]) if (tp[c] + fp[c]) else float("nan")
         r = tp[c] / n_true if n_true else float("nan")
         if n_true or (tp[c] + fp[c]):
