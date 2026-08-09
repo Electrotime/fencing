@@ -785,9 +785,8 @@ windows are scored wrong whatever the model says.
 6 across bouts 1+2, and parries from BOTH fencers (left 6, right 5), which removes the
 per-fencer confound that made bout 2's evidence weak.
 
-First: **11 of 11 parries have `retreat` as their footwork.** Aaron's observation is not a
-tendency here, it is unanimous, and it is the cleanest possible justification for the
-two-track schema.
+First: **11 of 11 parries have `retreat` as their footwork.** (CORRECTED by bout 4 below --
+across 46 parries it is 74% retreat, not 100%. One bout was talking.)
 
 But the schema is not what is blocking parry. Scored on 399 labelled windows:
 
@@ -822,27 +821,123 @@ lunge→advance collapse is worth investigating on its own.
 Bout 3 overall 42.1% sits with bout 1's 42.9% and bout 2's 42.3%: the pipeline is consistent
 across three matches now.
 
-**POOLING IS THE BUG FOR TRANSIENT ACTIONS — lunge recall 9% -> 78% (2026-08-08).**
-`ActionLSTM` reduces its LSTM output with `out.mean(dim=1)` over all 60 frames, but a window
-is SCORED at its newest frame, so a 0.8 s lunge sits only at the recent end and gets averaged
-against up to 2 s of whatever preceded it. `ActionFrameLSTM` + `frame_logits_to_window(
-mode="last")` does not dilute. Scored standalone on bout 3 (`--frame-model`):
+**THE PER-FRAME MODEL IS A DEGENERATE LUNGE PREDICTOR. Do not route to it (2026-08-08).**
+Recorded because the opposite conclusion was reached first, on bout 3 alone, and was wrong.
 
-| bout 3, raw | window model (mean-pooled) | per-frame model (last step) |
+The hypothesis was that `out.mean(dim=1)` over 60 frames dilutes a 0.8 s lunge, since a window
+is scored at its NEWEST frame, and that `ActionFrameLSTM` + `frame_logits_to_window(
+mode="last")` would fix it. On bout 3 lunge recall went 9% -> 78% and that looked decisive.
+
+Checked on all three bouts, recall DOES replicate — 81% / 74% / 78% — but precision does not:
+
+| `--frame-model`, raw | bout 1 | bout 2 | bout 3 |
+|---|---|---|---|
+| overall | **14.8%** | 38.1% | 34.3% |
+| lunge recall | 81% | 74% | 78% |
+| lunge **precision** | **3%** | 29% | 26% |
+| predicts lunge on | **60%** of windows | 33% | 49% |
+| true lunge share | **2%** | 12% | 16% |
+
+It fires lunge on 60% of bout 1's windows against a 2% true share. High recall at 3% precision
+is a saturated class, not a detector, and the same pattern explains its parry "recall" of 25%
+and 20% on bouts 1-2 (precision 2% and 6%). Fitting the prior to each bout's OWN labels — which
+is cheating — still leaves bout 1 at 16.6% with lunge precision 3%, so this is not a
+calibration problem either.
+
+**The pooling hypothesis therefore has no support.** There is no evidence that mean-pooling is
+what hurts transient actions. The window model remains the best available at 42.9 / 42.3 /
+42.1% across the three bouts. `FAST_CLASSES` + `FAST_CONF = 0.65` is still an unreachable dead
+path (parry's probability maxes at 0.106) but replacing it with a per-frame router is NOT the
+answer.
+
+**Method note — this was the day's fifth wrong call and its shape was familiar:** a single
+bout's headline number, a plausible mechanism written around it, and a precision column sitting
+in the same table that contradicted it. Recall without precision proves nothing; on this
+project, neither does one bout.
+
+### BOUT 4 (2026-08-09) — the continuous corpus is now viable
+
+`data/labels/bout4_intervals_2track.csv`, from a 26.1 min source: **304 intervals, 708 s of
+labelled fencer-time**, which is 2.4x bouts 1-3 combined. Sparse by design (23% coverage) —
+Aaron: "if there is a gap it probably means there's no arm/blade thing."
+
+| | bouts 1-3 | bout 4 | total |
+|---|---|---|---|
+| labelled fencer-time | 294 s | **708 s** | 1002 s |
+| parries | 17 | **46** | 63 |
+| lunges | 33 | 61 | 94 |
+| independent ~2 s windows | ~147 | **~354** | **~500** |
+
+**This crosses the threshold that made continuous training not worth doing.** The clip corpus
+is 488 windows; the continuous corpus is now ~500, with realistic transitions and no
+clip-cutting artifacts. Train on BOTH — the clips carry match diversity that four bouts do not.
+
+**CORRECTION to bout 3's headline finding.** "11 of 11 parries have retreat footwork" does not
+generalise. Over 46 parries:
+
+| footwork under a parry | n |
+|---|---|
+| retreat | 34 (74%) |
+| neutral | 7 |
+| advance | 5 |
+
+Parries during an ADVANCE exist. This strengthens the two-track case rather than weakening it —
+a single label could not express any of the three — but the unanimity was one bout talking, the
+same error shape as the p99 blade result and the per-frame routing result. Parries are also
+balanced across fencers (left 22, right 24), so bout 4 carries no per-fencer confound.
+
+**Still do NOT pool bout 4 into CLASS_PRIOR.** 23% coverage selected for action: its duration
+shares describe where Aaron looked, not the sport. A contiguous stretch is still needed for that.
+
+**FIXED: A/B SLOT SWAPPING WAS THE LARGEST ERROR IN THE SYSTEM. Bout 4 43.6% -> 55.1%.**
+
+Found only because bout 4 is big enough (3822 scored windows) to separate two hypotheses that
+look identical at bout-1-to-3 scale. The dominant error was 556 advance<->retreat confusions,
+near-symmetric. Two possible causes: the model cannot judge direction, or it can and the slots
+are swapped. The test: fencers move in OPPOSITE directions essentially always, so ask what the
+model says about the PAIR.
+
+| model committed to a direction for both fencers | n | |
 |---|---|---|
-| **lunge** | 9% | **78%** |
-| advance | 82% | 8% |
-| retreat | 90% | 53% |
-| parry | 0% | **0%** |
-| overall | **42.1%** | 34.3% |
+| INVERTED pair — right that they oppose, wrong which way | 155 | **47%** |
+| correct pair | 110 | 34% |
+| both same (physically impossible) | 63 | 19% |
 
-The two are cleanly complementary and in exactly the direction the pooling argument predicts:
-mean-pool wins on SUSTAINED footwork, last-step wins on the SPIKE. This is what `FAST_CLASSES`
-was reaching for with the wrong mechanism — a short window of the same mean-pooled model,
-gated behind `FAST_CONF = 0.65` that parry's 0.106 max can never reach. **Next change: route
-lunge to the per-frame model.** Both models are already trained and on disk; no labels needed.
-Note the earlier finding that the per-frame model hurt inside the ENSEMBLE still stands — it
-is a router that is wanted here, not an average.
+81% opposite when it commits to both, against 50% for a coin flip — so directional signal was
+always there. And the 155 inverted windows form **~19 CONTIGUOUS RUNS** (median gap 0.17 s =
+consecutive predictions), not scattered flicker: a sustained mis-assignment, not noise.
+
+Cause, in `_assign_boxes`: with two detections it swapped A/B whenever remembered hip positions
+preferred it. Assignment writes `last_hip_x`, which drives the next assignment, so ONE bad swap
+persists indefinitely — the same absorbing-error mode diagnosed on the referee experiments
+earlier the same day, in code that had been read twice without noticing.
+
+**Fix: fencers never cross a piste, so relative x-order IS identity.** Leftmost -> A, rightmost
+-> B, always, no history. Memoryless, so a bad frame cannot propagate.
+
+| bout | before | after | scored windows |
+|---|---|---|---|
+| 1 | 42.9% | 43.4% | 874 |
+| 2 | 42.3% | **48.3%** | 266 |
+| 3 | 42.1% | 42.1% | 399 |
+| **4** | 43.6% | **55.1%** | **3822** |
+| 4, viewer view | 51.7% | **61.5%** | |
+
+No bout regressed. On bout 4: advance 29%/30% -> **52%/54%**, retreat 29%/39% -> **50%/67%**,
+and the 556 direction confusions fall to 174 (-69%), which is the mechanism check the fix was
+predicted to pass. Parry is untouched (1 correct of 211 before, 3 of 207 after) — as expected;
+this was never a parry problem.
+
+**Why this was missed for so long:** at 266-874 windows the inverted runs are rare enough to
+look like ordinary confusion. It took 26 minutes of labelled footage to make a tracking bug
+distinguishable from a learning problem. That is the strongest argument yet for continuous
+labelled data — not as training material, but as instrumentation.
+
+Transcription notes (source table had a few slips, all recorded rather than silently fixed):
+two malformed timestamps (`20.53.520`, `22:118.967`) read as `20:53.520` and `22:18.967`; one
+right-fencer blade action at 1360.045 s dropped because its footwork cell was blank; five
+overlaps of 0.01-0.14 s clamped by truncating the earlier interval (the shortest real interval
+in the bout is 0.30 s, so a clamp that size cannot move a label onto the wrong action).
 
 **PARRY IS CLOSED.** 0% in both architectures, with 47 parry clips (more than advance's 35 or
 retreat's 33). Not a data problem, not a schema problem, not a prior problem, not a pooling

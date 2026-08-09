@@ -161,17 +161,28 @@ def _assign_boxes(dets: list[np.ndarray], tracks: dict[str, FencerTrack],
         slots[slot] = dets[0]
         return slots
 
-    # two detections: left/right by default, but swap if the remembered
-    # positions say the fencers are the other way around
+    # Two detections: ALWAYS leftmost -> A, rightmost -> B. No history, no swap.
+    #
+    # FENCERS NEVER CROSS. On a piste the left fencer is left for the whole bout,
+    # so the relative x-order of two boxes IS their identity -- more reliable than
+    # any remembered position, and it cannot drift.
+    #
+    # This used to swap A/B when remembered hip positions preferred it, and that
+    # was actively harmful: assignment feeds last_hip_x, which feeds the next
+    # assignment, so one bad swap (a missed frame, a clinch, a silhouette in a
+    # slot) PERSISTS. Measured on bout 4 -- of the 328 timestamps where the model
+    # committed to a direction for both fencers, 47% were INVERTED PAIRS: correct
+    # that the two oppose, wrong about which way. Those 155 windows form ~19
+    # CONTIGUOUS RUNS, not scattered flicker, which is the signature of a sustained
+    # mis-assignment rather than per-window noise. Slot A treats forward as
+    # rightward and B as leftward, so a swap inverts advance and retreat -- the
+    # single largest error in the system (556 advance/retreat confusions).
+    #
+    # The old docstring justified the swap by "drifting over the frame midline",
+    # but that risk applies to a FIXED midline; this compares the two detections to
+    # each other, so it never had the problem the swap was guarding against.
     order = np.argsort(cxs)
-    left, right = dets[order[0]], dets[order[1]]
-    lcx, rcx = cxs[order[0]], cxs[order[1]]
-    straight = sum(abs(c - history[s]) for s, c in (("A", lcx), ("B", rcx)) if s in history)
-    swapped = sum(abs(c - history[s]) for s, c in (("A", rcx), ("B", lcx)) if s in history)
-    if history and swapped < straight:
-        slots["A"], slots["B"] = right, left
-    else:
-        slots["A"], slots["B"] = left, right
+    slots["A"], slots["B"] = dets[order[0]], dets[order[1]]
     return slots
 
 
@@ -260,12 +271,57 @@ def _predict(model: ActionLSTM, track: FencerTrack) -> None:
         track.counts[track.label] = track.counts.get(track.label, 0) + 1
 
 
+def _self_test_assign() -> None:
+    """Slot assignment must be MEMORYLESS for two detections. Run with --self-test.
+
+    Guards the single largest fix this project has had (bout 4: 43.6% -> 55.1%).
+    `_assign_boxes` used to swap A/B when remembered hip positions preferred it,
+    and because assignment writes the history that drives the next assignment, one
+    bad swap persisted -- 47% of two-fencer direction calls came out INVERTED, in
+    ~19 contiguous runs. Restoring any history-dependence here brings that back.
+    """
+    def box(cx, w=100):
+        return np.array([cx - w / 2, 0, cx + w / 2, 300], dtype=np.float32)
+
+    def cx_of(b, W=1000):
+        return None if b is None else round(float((b[0] + b[2]) / 2 / W), 3)
+
+    def tracks_at(pos):
+        tr = {s: FencerTrack() for s in ("A", "B")}
+        for s, hx in pos.items():
+            tr[s].kp.append(np.ones((N_LANDMARKS, 4), dtype=np.float32))
+            tr[s].last_hip_x = hx
+        return tr
+
+    dets = [box(250), box(750)]
+    # the critical case: history says the fencers are the OTHER way round, which is
+    # physically impossible on a piste and used to trigger a swap. x-order wins.
+    out = _assign_boxes(dets, tracks_at({"A": 0.75, "B": 0.25}), 1000)
+    assert (cx_of(out["A"]), cx_of(out["B"])) == (0.25, 0.75), "history overrode x-order"
+
+    out = _assign_boxes(dets, tracks_at({"A": 0.25, "B": 0.75}), 1000)
+    assert (cx_of(out["A"]), cx_of(out["B"])) == (0.25, 0.75), "agreeing history broke it"
+
+    out = _assign_boxes(dets, {s: FencerTrack() for s in ("A", "B")}, 1000)
+    assert (cx_of(out["A"]), cx_of(out["B"])) == (0.25, 0.75), "no history broke it"
+
+    # a single detection still needs history -- x-order says nothing about WHICH
+    # fencer is visible, so that path deliberately stays history-dependent
+    out = _assign_boxes([box(700)], tracks_at({"A": 0.20, "B": 0.75}), 1000)
+    assert out["B"] is not None and out["A"] is None, "lone box went to the wrong slot"
+
+    print("self-test ok: two-box assignment is memoryless, lone box uses history")
+
+
 def main() -> None:
+    if "--self-test" in sys.argv:
+        _self_test_assign()
+        return
     argv = [a for a in sys.argv[1:] if a != "--frame-model"]
     use_frame = "--frame-model" in sys.argv
     if not argv:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
-                 "[--frame-model]")
+                 "[--frame-model | --self-test]")
     video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")

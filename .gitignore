@@ -40,3 +40,6 @@ fencing/data/labels/*_blade.npz
 
 # Annotated diagnostic frames from scripts/inspect_detections.py -- regenerable.
 fencing/data/diagnostics/
+
+# Per-frame-model probability caches from evaluate_labels.py --frame-model.
+fencing/data/labels/*_probs_frame.npz
