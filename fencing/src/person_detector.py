@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from ultralytics import YOLO
 
@@ -28,8 +30,14 @@ MIN_CONFIDENCE = 0.4
 # dark patch near the bottom edge, and lighting varies between venues and across a
 # single bout. Within one frame the comparison is what matters: a white uniform is
 # far brighter than a silhouette, whatever the exposure.
+#
+# Set FENCING_NO_SILHOUETTE_FILTER=1 to disable, for A/B measurement only. The
+# filter's original -3 pt cost was measured while _assign_boxes was still swapping
+# A/B slots, which corrupted direction on the same frames, so that number needs
+# re-taking against the corrected pipeline before it means anything.
 FOREGROUND_MAX_REL_MEAN = 0.55  # this dark relative to the brightest box = silhouette
 FOREGROUND_MIN_BOTTOM = 0.90    # box runs to the frame bottom, i.e. in front of the piste
+FILTER_ENABLED = os.environ.get("FENCING_NO_SILHOUETTE_FILTER", "") != "1"
 
 
 def load_person_model() -> YOLO:
@@ -73,7 +81,7 @@ def get_fencer_boxes(
     # faces left, so a misassignment inverts net-forward and turns advances into
     # retreats -- measured, 63 of 122. This only removes boxes that are provably
     # not fencers and leaves the assignment path untouched.
-    if len(xyxy) > 2:
+    if len(xyxy) > 2 and FILTER_ENABLED:
         means = np.full(len(xyxy), np.nan)
         for i, b in enumerate(xyxy):
             x1, y1, x2, y2 = (int(v) for v in b)

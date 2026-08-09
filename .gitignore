@@ -43,3 +43,7 @@ fencing/data/diagnostics/
 
 # Per-frame-model probability caches from evaluate_labels.py --frame-model.
 fencing/data/labels/*_probs_frame.npz
+
+# Extracted continuous training windows (scripts/extract_continuous.py).
+# Large, and regenerable from video + labels in ~90 min.
+fencing/data/train_continuous/

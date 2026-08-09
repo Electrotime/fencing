@@ -855,6 +855,53 @@ bout's headline number, a plausible mechanism written around it, and a precision
 in the same table that contradicted it. Recall without precision proves nothing; on this
 project, neither does one bout.
 
+### CONTINUOUS TRAINING WORKS: +17.5 pts leave-one-bout-out (2026-08-09)
+
+The model had only ever trained on 488 hand-cut clip windows; interval labels were used for
+evaluation and the prior, never for learning. `scripts/extract_continuous.py` closes that
+(5352 windows across four bouts), `scripts/train_continuous.py` tests it.
+
+Validation is LEAVE-ONE-BOUT-OUT, never a random split: windows are emitted every 5 frames
+from a 60-frame span so neighbours share 92% of their frames, and a random split would put
+near-duplicates on both sides and report a fantasy. Held-out bout = held-out match.
+
+| held-out | clips only | **clips + continuous** |
+|---|---|---|
+| bout 1 | 41.0% | **70.0%** |
+| bout 2 | 45.7% | **54.3%** |
+| bout 3 | 35.3% | **60.4%** |
+| bout 4 | 49.5% | **57.0%** |
+| **mean** | **42.9%** | **60.4%** |
+
+Same recipe on both sides, 2 seeds, so this is apples-to-apples. Every bout improves.
+
+**THE POST-HOC CLASS_PRIOR CAN BE RETIRED.** Training unweighted on continuous windows, which
+arrive at their NATURAL frequencies, scores **60.4%** — identical to inverse-frequency
+weighting plus the prior multiplied back in. The prior was always a patch for the fact that
+clips over-represent exciting classes and inverse-frequency weighting then drove the effective
+prior to uniform. Real frequencies in the training data remove the need for both. Same
+accuracy, one fewer hand-tuned constant, and no per-venue re-estimation.
+
+**Parry moved for the first time**: 40% recall on held-out bout 2, 14% on bout 4 (shipped
+model: 1%). Still 0% on bouts 1 and 3, so it is not solved — but it is no longer inert, and
+the thing that moved it was training data with real transitions rather than any feature,
+architecture or threshold change.
+
+Caveats before shipping this:
+- Evaluation is on the cached tensors, which are built identically to inference (verified:
+  extracted window counts match evaluate_labels exactly, e.g. bout 1 = 869 both ways). An
+  end-to-end `evaluate_labels` run against a newly trained checkpoint should still confirm it.
+- The `clips only` baseline here is a single 40-epoch model, weaker than the SHIPPED 5-model
+  ensemble with best-epoch selection (which averages 47.2% across these four bouts). So the
+  real-world gain is smaller than +17.5 — compare 60.4% against 47.2% for the honest figure,
+  and re-run with ensembling before claiming a number.
+- 2 seeds. Variance was low (+-0.1 to 1.4%) except the clips-only baseline (+-13.3% on bout 1),
+  which is itself informative: 488 windows is not enough to train stably.
+
+Training uses `--stride 3` on continuous windows: at 92% overlap, every third window still
+leaves 75% overlap, so almost no information is lost and training cost drops 3x. Evaluation
+always uses every window.
+
 ### BOUT 4 (2026-08-09) — the continuous corpus is now viable
 
 `data/labels/bout4_intervals_2track.csv`, from a 26.1 min source: **304 intervals, 708 s of
@@ -932,6 +979,31 @@ this was never a parry problem.
 look like ordinary confusion. It took 26 minutes of labelled footage to make a tracking bug
 distinguishable from a learning problem. That is the strongest argument yet for continuous
 labelled data — not as training material, but as instrumentation.
+
+**Follow-ups checked after the fix, both negative, both cheap (offline, cached probs):**
+
+- **CLASS_PRIOR is already optimal — leave it alone.** It was suspected of having been tuned
+  around the swap bug. Re-fitted on the corrected pipeline it gives 43.8 / 48.3 / 42.1 / 55.0
+  against the shipped 43.4 / 48.3 / 42.1 / 55.1. No difference. The re-estimation that was on
+  the TODO list is done and there is nothing there.
+- **Parry AUC after the fix: 0.62 on bout 4's 207 windows** (bout 2 0.56, bout 3 0.60; bout 1's
+  0.85 is 8 windows and means nothing). Some signal exists, far too little to win a six-way
+  argmax against a 0.017 prior. Parry stays closed.
+- **Silhouette filter re-measured, KEEP IT.** Its original "-3 pt cost" was taken under the
+  swap bug. Re-run against the corrected pipeline (`FENCING_NO_SILHOUETTE_FILTER=1` toggles it
+  off for A/B):
+
+  | bout | filter ON | windows | correct | filter OFF | windows | correct |
+  |---|---|---|---|---|---|---|
+  | 1 | 43.4% | 869 | **377** | 46.0% | 789 | 363 |
+  | 2 | 48.3% | 265 | **128** | 50.4% | 252 | 127 |
+  | 3 | 42.1% | 399 | 168 | 42.1% | 399 | 168 |
+
+  Filter OFF looks 2 pts better and is not: it scores 80 FEWER windows on bout 1 and gets 14
+  FEWER calls right. Accuracy per window falls with the filter on because the windows it adds
+  are hard ones, not because it is wrong — the same coverage confound that made this look like
+  a regression the first time. Absolute correct calls is the honest metric when a change moves
+  coverage. Bout 3 has no foreground silhouettes so the filter is a no-op there.
 
 Transcription notes (source table had a few slips, all recorded rather than silently fixed):
 two malformed timestamps (`20.53.520`, `22:118.967`) read as `20:53.520` and `22:18.967`; one
