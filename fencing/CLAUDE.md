@@ -887,6 +887,33 @@ model: 1%). Still 0% on bouts 1 and 3, so it is not solved — but it is no long
 the thing that moved it was training data with real transitions rather than any feature,
 architecture or threshold change.
 
+**SHIPPED (2026-08-09).** `models/action_cont.pth` (5 members), trained by
+`scripts/train_shipping.py --ship` on clips + all four bouts at natural frequencies.
+`demo_video.MODEL_PATH` points at it and `APPLY_CLASS_PRIOR` is now **False**.
+`action_lstm.pth` is kept for comparison, not deleted.
+
+**End-to-end verification, on a HELD-OUT bout.** `train_shipping.py --holdout 1` trains
+without bout 1; scoring that checkpoint through the real `evaluate_labels` pipeline on bout 1:
+
+| bout 1 | shipped (clips only) | continuous, held-out |
+|---|---|---|
+| raw overall | 43.4% | **69.0%** |
+| offline tensor estimate | — | 70.0% |
+| advance | 47%/37% | **81%/53%** |
+| retreat | 34%/67% | **41%/98%** |
+| walking | 66%/63% | **84%/94%** |
+| neutral | 30%/6% | **90%/29%** |
+
+**Online 69.0% vs offline 70.0% — a 1 pt gap, so extraction and inference agree** and the
+leave-one-bout-out numbers can be trusted. Per-fencer is balanced (A 70.0%, B 68.2%).
+
+Note the shipped checkpoint trains on all four bouts, so it CANNOT be honestly scored on them.
+The honest generalisation estimates are the leave-one-bout-out 60.4% and this held-out 69.0%.
+
+No best-epoch selection and no class weighting, both deliberate — see train_shipping.py's
+docstring. Best-epoch selection is a known trap here (load_action_model's docstring: it lands
+on lunge-heavy checkpoints and validation accuracy is anti-correlated with demo behaviour).
+
 Caveats before shipping this:
 - Evaluation is on the cached tensors, which are built identically to inference (verified:
   extracted window counts match evaluate_labels exactly, e.g. bout 1 = 869 both ways). An

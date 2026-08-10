@@ -35,7 +35,13 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _normalize_sequence)
 from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
 
-MODEL_PATH = PROJECT_ROOT / "models" / "action_lstm.pth"
+# action_cont: trained on the clip corpus PLUS 5352 continuous windows from four
+# labelled bouts (scripts/extract_continuous.py + train_shipping.py --ship).
+# Leave-one-bout-out this recipe measured 60.4% against the clips-only 42.9%, and
+# an end-to-end run on a HELD-OUT bout 1 gave 69.0% against 43.4% for the old
+# checkpoint -- within 1 pt of its offline estimate, so extraction and inference
+# agree. action_lstm.pth (clips only) is kept for comparison, not deleted.
+MODEL_PATH = PROJECT_ROOT / "models" / "action_cont.pth"
 FRAME_MODEL_PATH = PROJECT_ROOT / "models" / "action_frame.pth"  # --frame-model
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
@@ -67,9 +73,18 @@ ACTION_CONF_FLOOR = 0.50   # below this the call is too unsure to show as an act
 # Correcting for it is standard label-shift: p(c|x) * target_prior / train_prior.
 # Validated by fitting the prior on one half of the labelled footage and scoring
 # the other (both directions): 15.7%->42.6% and 22.6%->41.2%. Per class, advance
-# goes 5%->67% recall. NOTE this is one 104 s bout; re-estimate as more footage is
-# labelled, and set APPLY_CLASS_PRIOR=False to measure without it.
-APPLY_CLASS_PRIOR = True
+# goes 5%->67% recall.
+#
+# RETIRED (2026-08-09) along with the clips-only checkpoint. All of the above was a
+# patch for a training set whose class mix was an artifact of how clips were cut.
+# action_cont.pth trains on continuous windows at their NATURAL frequencies, so its
+# prior is already correct and multiplying CLASS_PRIOR in again would correct
+# twice. Measured: inverse-frequency + post-hoc prior and natural-frequency + no
+# prior both score 60.4% leave-one-bout-out, so this buys nothing and costs a
+# hand-tuned constant that had to be re-estimated per venue.
+#
+# Set True again ONLY if MODEL_PATH is pointed back at a clips-only checkpoint.
+APPLY_CLASS_PRIOR = False
 # Pooled duration shares from BOTH labelled bouts (218 s). Re-derive with
 # scripts/estimate_class_prior.py whenever more footage is labelled.
 CLASS_PRIOR = {"advance": 0.184, "lunge": 0.045, "parry": 0.017,

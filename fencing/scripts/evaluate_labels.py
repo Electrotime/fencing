@@ -48,13 +48,40 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD, _landmarks_to_
 # frame_logits_to_window(mode="last"), which does not dilute. It is on record as
 # hurting inside the ENSEMBLE; it has never been scored standalone against interval
 # labels, which is a different question.
-_args = [a for a in sys.argv[1:] if not a.startswith("--")]
-USE_FRAME = "--frame-model" in sys.argv
+# --model PATH   score a different checkpoint (ensemble members `<stem>.m*.pth`
+#                beside it are picked up automatically)
+# --no-prior     skip the CLASS_PRIOR correction. Required for checkpoints trained
+#                on continuous windows at natural frequencies: their prior is
+#                already right, so applying it again corrects twice.
+# --tag NAME     suffix for the probability cache, so an experimental run does not
+#                overwrite the cache belonging to the shipped configuration
+_flags = {a.split("=")[0] for a in sys.argv[1:] if a.startswith("--")}
+
+
+def _flag_value(name, default=None):
+    for i, a in enumerate(sys.argv[1:]):
+        if a == name and i + 2 <= len(sys.argv[1:]):
+            return sys.argv[1:][i + 1]
+        if a.startswith(f"{name}="):
+            return a.split("=", 1)[1]
+    return default
+
+
+_skip = set()
+for _n in ("--model", "--tag"):
+    _v = _flag_value(_n)
+    if _v is not None:
+        _skip.add(_v)
+_args = [a for a in sys.argv[1:] if not a.startswith("--") and a not in _skip]
+USE_FRAME = "--frame-model" in _flags
+NO_PRIOR = "--no-prior" in _flags
+MODEL_OVERRIDE = _flag_value("--model")
+TAG = _flag_value("--tag", "")
 VIDEO = Path(_args[0]) if _args else PROJECT / "data" / "raw_video" / "1.mp4"
 LABELS = (Path(_args[1]) if len(_args) > 1
           else PROJECT / "data" / "labels" / "bout1_intervals.csv")
 CACHE_OUT = (PROJECT / "data" / "labels" /
-             f"{VIDEO.stem}_probs{'_frame' if USE_FRAME else ''}.npz")
+             f"{VIDEO.stem}_probs{'_frame' if USE_FRAME else ''}{TAG}.npz")
 # `extension` is not one of the six classes (it lives on as the arm-reach FEATURE),
 # so the model can never emit it; scoring those windows would measure the wrong
 # thing. Counted and excluded.
@@ -143,11 +170,16 @@ def truth_at(slot, t):
 
 # ---- run the demo pipeline -------------------------------------------------
 person_model = load_person_model()
-action_model = load_action_model(
-    PROJECT / "models" / ("action_frame.pth" if USE_FRAME else "action_lstm.pth"),
-    device=torch.device("cpu"),
-    cls=ActionFrameLSTM if USE_FRAME else ActionLSTM)
-print(f"model: {'action_frame.pth (per-frame, last-step reduction)' if USE_FRAME else 'action_lstm.pth (window, mean-pooled)'}")
+_default = PROJECT / "models" / ("action_frame.pth" if USE_FRAME else "action_lstm.pth")
+_mpath = Path(MODEL_OVERRIDE) if MODEL_OVERRIDE else _default
+action_model = load_action_model(_mpath, device=torch.device("cpu"),
+                                 cls=ActionFrameLSTM if USE_FRAME else ActionLSTM)
+print(f"model: {_mpath.name}"
+      + ("  [prior DISABLED for this run]" if NO_PRIOR else ""))
+if NO_PRIOR:
+    # A model trained on continuous windows at their natural frequencies already
+    # has the right prior; multiplying CLASS_PRIOR in again would correct twice.
+    D.APPLY_CLASS_PRIOR = False
 cap = cv2.VideoCapture(str(VIDEO))
 fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -263,7 +295,7 @@ for scope in ("RAW model call", "WHAT THE VIEWER SEES"):
         if n_true or (tp[c] + fp[c]):
             print(f"  {c:<10}{n_true:>8}{p:>11.0%}{r:>9.0%}")
     print()
-
+    print("=== Confusion matrix")
 print("=== CONFUSION (raw call), rows = truth ===")
 cls = sorted({p[1] for p in pairs})
 cols = sorted({p[2] for p in pairs})

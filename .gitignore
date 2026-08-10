@@ -47,3 +47,8 @@ fencing/data/labels/*_probs_frame.npz
 # Extracted continuous training windows (scripts/extract_continuous.py).
 # Large, and regenerable from video + labels in ~90 min.
 fencing/data/train_continuous/
+
+# Throwaway leave-one-out checkpoints from train_shipping.py --holdout, and
+# their probability caches. Verification artifacts, regenerable in ~15 min.
+fencing/models/verify_*.pth
+fencing/data/labels/*_probs_verify.npz
