@@ -54,6 +54,10 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--members", type=int, default=4)
     ap.add_argument("--stride", type=int, default=3)
+    # A checkpoint's pooling mode is part of its identity: all modes share the same
+    # parameter shapes, so loading with the wrong one succeeds silently and behaves
+    # wrong. Whatever is used here must match demo_video.POOL_MODE.
+    ap.add_argument("--pool", default="last", choices=ActionLSTM.POOL_MODES)
     a = ap.parse_args()
     if bool(a.holdout) == bool(a.ship):
         print("pick exactly one of --holdout N or --ship")
@@ -78,13 +82,13 @@ def main() -> int:
     c = Counter(Y.tolist())
     print("  class mix: " + "  ".join(
         f"{n}={c.get(i, 0)}({c.get(i, 0) / len(Y):.0%})" for i, n in enumerate(CLASS_NAMES)))
-    print(f"  {a.members} members x {a.epochs} epochs, no class weighting, "
-          f"no best-epoch selection", flush=True)
+    print(f"  {a.members} members x {a.epochs} epochs, pool={a.pool}, "
+          f"no class weighting, no best-epoch selection", flush=True)
 
     ds = TensorWindows(X, A, L, Y)
     for m in range(a.members):
         torch.manual_seed(42 + m)
-        model = ActionLSTM().to(device)
+        model = ActionLSTM(pool=a.pool).to(device)
         opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
         lossf = torch.nn.CrossEntropyLoss()
         dl = DataLoader(ds, batch_size=32, shuffle=True)

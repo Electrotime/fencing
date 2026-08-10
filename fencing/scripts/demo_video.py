@@ -42,6 +42,13 @@ from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
 # checkpoint -- within 1 pt of its offline estimate, so extraction and inference
 # agree. action_lstm.pth (clips only) is kept for comparison, not deleted.
 MODEL_PATH = PROJECT_ROOT / "models" / "action_cont.pth"
+# The checkpoint's time-reduction mode. MUST match how MODEL_PATH was trained --
+# all modes share the same parameter shapes, so a mismatch loads cleanly and just
+# behaves wrong. `last` measured +4 to +5 pts over `mean` on all three held-out
+# bouts, with the gain concentrated in the transient and quiet classes (bout 4:
+# lunge 37->56%, advance 30->43%). See ActionLSTM's docstring for the full table.
+# Pre-2026-08-09 checkpoints (action_lstm.pth) are "mean".
+POOL_MODE = "last"
 FRAME_MODEL_PATH = PROJECT_ROOT / "models" / "action_frame.pth"  # --frame-model
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
@@ -355,7 +362,9 @@ def main() -> None:
         print(f"using the per-frame model ({FRAME_MODEL_PATH.name})")
     else:
         # picks up the ensemble members if they are there, else the single checkpoint
-        action_model = load_action_model(MODEL_PATH, device=torch.device("cpu"))
+        action_model = load_action_model(
+            MODEL_PATH, device=torch.device("cpu"),
+            cls=lambda: ActionLSTM(pool=POOL_MODE))
     blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
     if blade_model is None:
         print("(no blade weights found, skipping the blade tip overlay)")

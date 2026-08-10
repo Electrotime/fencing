@@ -40,7 +40,7 @@ def get_blade_tip(frame: np.ndarray, model: YOLO) -> tuple[float, float] | None:
 def get_blade_tip_trajectory(
     video_path: str | Path,
     model: YOLO,
-) -> list[tuple[float, float] | None]:
+) -> list[tuple[float, float] | None]: 
     """Blade tip position for every frame of a video (None where nothing was found)."""
     video_path = Path(video_path)
     cap = cv2.VideoCapture(str(video_path))
@@ -76,7 +76,7 @@ def compute_tip_velocity(
             velocities.append(NULL_VELOCITY)
         else:
             velocities.append((float(curr[0] - prev[0]), float(curr[1] - prev[1])))
-
+    
     return velocities
 
 

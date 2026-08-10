@@ -99,7 +99,8 @@ def top_windows(windows: list[tuple[int, int]], score: np.ndarray, n: int) -> li
             break
         if not any(not (e < ps or s > pe) for ps, pe in picked):
             picked.append((s, e))
-    return picked
+    return picked 
+    
 
 
 def extract_raw_kp(video_path: Path, max_frames: int) -> tuple[np.ndarray, float]:
@@ -195,6 +196,8 @@ def save_clip(video_path: Path, start_frame: int, end_frame: int, fps: float, ou
     except subprocess.CalledProcessError as e:
         tail = e.stderr.decode(errors="replace")[-500:]
         sys.exit(f"ffmpeg died while cutting {output_path.name}:\n{tail}")
+    except subprocess.TimeoutExpired:
+        sys
 
 
 def main() -> None:

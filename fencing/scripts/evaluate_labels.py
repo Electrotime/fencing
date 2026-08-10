@@ -170,11 +170,18 @@ def truth_at(slot, t):
 
 # ---- run the demo pipeline -------------------------------------------------
 person_model = load_person_model()
-_default = PROJECT / "models" / ("action_frame.pth" if USE_FRAME else "action_lstm.pth")
+_default = PROJECT / "models" / ("action_frame.pth" if USE_FRAME else D.MODEL_PATH.name)
 _mpath = Path(MODEL_OVERRIDE) if MODEL_OVERRIDE else _default
-action_model = load_action_model(_mpath, device=torch.device("cpu"),
-                                 cls=ActionFrameLSTM if USE_FRAME else ActionLSTM)
-print(f"model: {_mpath.name}"
+if not _mpath.is_absolute() and not _mpath.exists():
+    _mpath = PROJECT / "models" / _mpath.name
+# --pool defaults to demo_video's POOL_MODE so this scores what actually ships.
+# Override when evaluating an older checkpoint: modes share parameter shapes, so a
+# mismatch loads silently and reports numbers for a model nobody trained.
+_pool = _flag_value("--pool", D.POOL_MODE)
+action_model = load_action_model(
+    _mpath, device=torch.device("cpu"),
+    cls=ActionFrameLSTM if USE_FRAME else (lambda: ActionLSTM(pool=_pool)))
+print(f"model: {_mpath.name}" + ("" if USE_FRAME else f"  pool={_pool}")
       + ("  [prior DISABLED for this run]" if NO_PRIOR else ""))
 if NO_PRIOR:
     # A model trained on continuous windows at their natural frequencies already

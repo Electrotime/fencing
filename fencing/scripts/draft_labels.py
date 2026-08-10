@@ -118,7 +118,7 @@ def main() -> int:
                                  data=cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)),
                         int(idx * 1000 / fps))
                     kp = _landmarks_to_array(res)
-                    x1, y1, x2, y2 = box
+                    x1, y1, x2, y2 = box 
                     kp[:, 0] = (x1 + kp[:, 0] * (x2 - x1)) / W
                     kp[:, 1] = (y1 + kp[:, 1] * (y2 - y1)) / H
                     low = kp[:, 3] < VISIBILITY_THRESHOLD

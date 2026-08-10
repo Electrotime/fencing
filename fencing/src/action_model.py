@@ -320,8 +320,36 @@ class ActionLSTM(nn.Module):
     the zero-padded score that was partly measuring the artifact.
     """
 
-    def __init__(self) -> None:
+    POOL_MODES = ("mean", "max", "last")
+
+    def __init__(self, pool: str = "mean") -> None:
+        """`pool` selects the time reduction. DEFAULTS TO "mean" for a reason:
+        every checkpoint trained before 2026-08-09 used it, and all three modes
+        have IDENTICAL parameter shapes, so a mismatched mode loads silently and
+        just behaves wrong. A checkpoint's mode is part of its identity -- see
+        demo_video.POOL_MODE, which is set alongside MODEL_PATH.
+
+        Measured leave-one-bout-out (scripts/exp_pooling.py), continuous training,
+        `last` against the `mean` baseline:
+
+            bout 1  69.0% -> 73.0%      bout 3  64.9% -> 69.8%
+            bout 4  57.9% -> 62.6%
+
+        Consistent +4 to +5 on all three, and it is the transient and quiet
+        classes that move: on bout 4 (3819 windows) lunge 37% -> 56%, advance
+        30% -> 43%, parry 13% -> 20%. Averaging a 0.7 s lunge across a 2 s window
+        was destroying it, and a window is scored at its NEWEST frame, so the last
+        real timestep is the one the label actually describes.
+
+        NOTE an earlier attempt at this conclusion was wrong -- it used the
+        per-frame model, which turned out to be a degenerate lunge predictor. The
+        difference here is a single-output model, three held-out bouts, and
+        precision reported next to recall.
+        """
         super().__init__()
+        if pool not in self.POOL_MODES:
+            raise ValueError(f"pool must be one of {self.POOL_MODES}, got {pool!r}")
+        self.pool = pool
         self.lstm = nn.LSTM(INPUT_SIZE, HIDDEN_SIZE, batch_first=True)
         self.head = nn.Sequential(
             nn.Linear(HIDDEN_SIZE + N_AGG_FEATURES, 64),
@@ -333,12 +361,19 @@ class ActionLSTM(nn.Module):
     def forward(self, x: torch.Tensor, agg: torch.Tensor,
                 lengths: torch.Tensor | None = None) -> torch.Tensor:
         out, _ = self.lstm(x)
-        if lengths is None:                  # caller fed a full window (the demo does)
-            pooled = out.mean(dim=1)
-        else:
-            steps = torch.arange(x.shape[1], device=x.device)[None, :]
-            mask = (steps < lengths[:, None].to(x.device)).unsqueeze(-1).to(out.dtype)
+        if lengths is None:
+            # caller fed a full window with no length; treat every frame as real
+            lengths = torch.full((x.shape[0],), x.shape[1], device=x.device)
+        steps = torch.arange(x.shape[1], device=x.device)[None, :]
+        mask = (steps < lengths[:, None].to(x.device)).unsqueeze(-1).to(out.dtype)
+        if self.pool == "mean":
             pooled = (out * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0)
+        elif self.pool == "max":
+            # -inf on padding: zeros would otherwise beat negative activations
+            pooled = out.masked_fill(mask == 0, float("-inf")).max(dim=1).values
+        else:  # last real timestep
+            idx = (lengths.to(out.device) - 1).clamp(min=0)
+            pooled = out[torch.arange(out.shape[0], device=out.device), idx]
         return self.head(torch.cat([pooled, agg], dim=-1))
 
 

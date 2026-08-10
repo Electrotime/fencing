@@ -929,6 +929,101 @@ Training uses `--stride 3` on continuous windows: at 92% overlap, every third wi
 leaves 75% overlap, so almost no information is lost and training cost drops 3x. Evaluation
 always uses every window.
 
+### POOLING: `last` beats `mean` by +4-5 pts on every bout. SHIPPED (2026-08-09)
+
+`scripts/exp_pooling.py`. Five masked reductions, identical trunk and recipe, leave-one-bout-out.
+Masking is not optional — clip length is class-correlated, so pooling over padding lets the
+model read "how much of this is zeros" as a class cue (see ActionLSTM's docstring).
+
+| pooling | bout 1 | bout 3 | bout 4 |
+|---|---|---|---|
+| mean (was shipped) | 69.0% | 64.9% | 57.9% |
+| max | 71.6% | 65.2% | 60.5% |
+| meanmax | 69.3% | 64.0% | 59.5% |
+| attn | 70.0% | 64.0% | 58.4% |
+| **last** | **73.0%** | **69.8%** | **62.6%** |
+
+Consistent +4 to +4.9 on all three, and the gain is concentrated where predicted — bout 4:
+lunge 37->56%, advance 30->43%, parry 13->20%. A window is scored at its NEWEST frame, so the
+last real timestep is the one the label actually describes; averaging a 0.7 s lunge across 2 s
+was destroying it.
+
+**End-to-end verified** on held-out bout 1: **74.0%** (mean-pooled 69.0%, original shipped
+43.4%), viewer view 79.5%. advance 67%/65%, lunge 44%/33%, neutral 85%/39%, retreat 54%/96%,
+walking 88%/95%.
+
+`ActionLSTM(pool=...)` defaults to `mean` deliberately: all modes have IDENTICAL parameter
+shapes, so a mismatched mode loads silently and behaves wrong. A checkpoint's mode is part of
+its identity — `demo_video.POOL_MODE` sits next to `MODEL_PATH`, and `train_shipping.py --pool`
+must agree with it. Pre-2026-08-09 checkpoints are `mean`.
+
+An earlier version of this conclusion was WRONG (retracted above): it used the per-frame model,
+which was a degenerate lunge predictor. What made the difference was a single-output model,
+three held-out bouts, and reading precision next to recall.
+
+### TWO HEADS: Aaron's two-indicator framing, and how I mis-scored it (2026-08-09)
+
+Aaron: "what if we have two indicators, a footwork and then a parry one, so that when a parry
+comes on, both can be shown instead of one taking over the other."
+
+This exposed a scoring error. `exp_two_head.py` originally COLLAPSED the two heads back to one
+label, so every false parry overwrote a correct footwork call and the metric charged it the
+full cost of a destroyed prediction. Displayed as two independent indicators that cost does not
+exist. I scored a two-indicator model with a one-indicator metric.
+
+Re-run with `--pool last` and reported per track:
+
+| held out | blade labels in training | footwork 5-way | parry lamp, best threshold | collapsed |
+|---|---|---|---|---|
+| bout 4 | 189 | 64.0% | 9% prec @ 36% lit — CHANCE (base 5.4%) | 51.8% |
+| bout 3 | 1329 | **77.9%** | 28% prec @ 3.4% lit (base 13.8%) — 2x chance | **71.3%** |
+
+Two things follow:
+- **The two-head structure does pay with `last` pooling**: collapsed 71.3% on bout 3 beats the
+  single head's 69.8%. With `mean` it did not (65.5%).
+- **Parry precision scales with blade supervision.** Starved (189 labels) the head is at
+  chance; fed (1329) it is 2x base rate. Recall is still only ~6%, so the lamp would rarely
+  light — but this is the first evidence that MORE TWO-TRACK PARRY LABELS could make parry
+  viable, which softens the earlier "parry is closed". Closed for the single-label six-way
+  model; not closed for a separately-supervised blade head.
+
+A threshold sweep is the right diagnostic for a lamp: on bout 4 precision stays pinned at 9%
+from 0.25 to 0.90 while the lit fraction falls 36%->20%, which is exactly what no
+discriminative signal looks like. On bout 3 precision moves 0%->33% across the sweep, which is
+what real (if weak) signal looks like.
+
+### LEARNING CURVE: more labelling still pays, but only a few points (2026-08-09)
+
+`scripts/learning_curve.py --holdout 1`. Fractions are CONTIGUOUS TIME SLICES, not random
+window samples — labelling less footage means covering less of the match, and since
+neighbouring windows share 92% of their frames a random 25% sample still covers the whole bout
+and would flatter the curve badly. (`--random-subsample` exists to demonstrate that, not to be
+used.) All points unweighted, no prior, 2 seeds, bout 1 never trained on.
+
+| fraction | continuous windows | held-out bout 1 |
+|---|---|---|
+| 0.00 (clips only) | 0 | 25.8% |
+| 0.10 | 149 | 46.3% |
+| 0.25 | 373 | 58.4% |
+| 0.50 | 746 | 64.2% |
+| 0.75 | 1122 | 66.8% |
+| 1.00 | 1495 | **69.0%** |
+
+Marginal value of the last 25%: **+2.2 pts** (previous step +2.6). Shallow and steady, not a
+cliff. Practical translation: **another bout the size of bout 4 buys roughly +3-5 points**, not
+another +20. Worth doing if labelling is cheap, not worth many hours.
+
+**It will NOT fix parry: 0% recall at FULL data.** Weak classes at full data are parry 0%,
+lunge 24%, neutral 30% — the transient and quiet ones. retreat (98%) and walking (94%) are
+done. So the remaining headroom is in classes that more of the same footage demonstrably does
+not reach, which points at model changes (a separate blade head, pooling) rather than at more
+labelling.
+
+Aaron's field note on the shipped model: "neutral is sometimes called when someone does slower
+things or slows down." Consistent with neutral precision 90% / recall 29% — conservative but
+misplaced. His definition is "continuous seconds of relative stillness", so slow MOVEMENT
+reading as neutral is a genuine error, not a labelling disagreement.
+
 ### BOUT 4 (2026-08-09) — the continuous corpus is now viable
 
 `data/labels/bout4_intervals_2track.csv`, from a 26.1 min source: **304 intervals, 708 s of

@@ -32,7 +32,7 @@ for name in LIBS:
         print(f"  {name:<14} FAILED ({e})")
         missing.append(name)
 
-print()
+print() 
 if missing:
     print(f"missing {len(missing)}: {', '.join(missing)}")
     print("run: pip install -r requirements.txt")
