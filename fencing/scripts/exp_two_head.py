@@ -150,6 +150,11 @@ def main() -> int:
     # call -- so the usable operating point is a precision/recall trade, not the
     # argmax. Aaron's framing; the collapsed metric could not see this.
     ap.add_argument("--thresholds", default="0.25,0.4,0.5,0.6,0.75,0.9")
+    # Keep this fraction of BLADE labels, masking the rest to -1. Footwork labels
+    # are untouched, so this isolates "how much blade supervision" from every other
+    # variable -- the question being whether labelling more parries would actually
+    # make the lamp usable, or whether it plateaus at chance.
+    ap.add_argument("--blade-frac", type=float, default=1.0)
     a = ap.parse_args()
 
     bouts = {s: load_bout(s, a.stride) for s in CSV_FOR if (CONT / f"{s}.npz").exists()}
@@ -165,6 +170,14 @@ def main() -> int:
     L = np.concatenate([cL] + [bouts[k]["train"]["lengths"] for k in tr])
     F = np.concatenate([c_fw] + [bouts[k]["train"]["fw"] for k in tr])
     B = np.concatenate([c_bl] + [bouts[k]["train"]["bl"] for k in tr])
+
+    if a.blade_frac < 1.0:
+        rng = np.random.default_rng(0)
+        known = np.flatnonzero(B >= 0)
+        drop = rng.choice(known, size=int(round(len(known) * (1 - a.blade_frac))),
+                          replace=False)
+        B = B.copy()
+        B[drop] = -1
 
     device = _pick_device()
     print(f"held out bout {a.holdout}; train on clips + bouts {tr} = {len(F)} windows")

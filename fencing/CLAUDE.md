@@ -992,6 +992,63 @@ from 0.25 to 0.90 while the lit fraction falls 36%->20%, which is exactly what n
 discriminative signal looks like. On bout 3 precision moves 0%->33% across the sweep, which is
 what real (if weak) signal looks like.
 
+### MIRRORING: correct, invariance proven, and NOT WORTH SHIPPING (2026-08-09)
+
+Aaron asked whether the video could be cropped/edited for variation, the way Roboflow
+augmentation helped the blade detector. **No** — and the reason is worth keeping:
+`_normalize_sequence` hip-centres and divides by body height, so translation and scale are
+gone before the LSTM sees anything. Crop or zoom the video and the tensors are ~identical.
+The blade model was a PIXEL model; this one is not.
+
+Mirroring is the one augmentation normalisation does not erase (which leg leads, which arm
+extends, which way the fencer faces). `scripts/exp_mirror.py`.
+
+**The trap, and the proof.** `forward = world_vel * nose_dir`. Mirror the keypoints and
+nose_dir flips; miss the motion track and world_vel does not, so every advance silently
+becomes a retreat — the same direction inversion that cost 11 points earlier the same day, and
+invisible because the data would just be quietly wrong. Under a TRUE mirror both terms flip,
+so `forward` is unchanged, and by symmetry so is everything else. `test_invariance()` checks
+that against the real `_engineered_features` over 200 random windows: **worst delta 2.98e-07**.
+So the cached `agg` can be reused and only X needs mirroring — which matters, because the
+motion tracks were never cached.
+
+Result with the shipped `last` pooling:
+
+| held out | baseline | + mirrored |
+|---|---|---|
+| bout 1 | 73.0% | 73.2% |
+| bout 3 | 69.8% | 70.8% |
+| bout 4 | 62.6% | 62.8% |
+
+Positive on all three but **+0.5 mean against +-1.5 seed noise**, so not claimable, and on bout
+1 it trades advance 61->76 for lunge 43->24 and parry 38->25. Doubles training time for an
+effect indistinguishable from zero. NOT SHIPPED; kept for when there is more data.
+
+(An earlier run of this used `mean` pooling — no longer the deployed config — and came out
++1.5 / -1.3, i.e. pure noise. Always pass `--pool last`.)
+
+**What augmentation CANNOT touch:** the framing-sensitive parts of this pipeline are not
+learned. `MIN_BOX_H_FRAC`, the silhouette brightness/bottom thresholds and the pan strips are
+hand-calibrated constants, all calibrated on the same broadcast style. Only real footage from a
+different venue tests those.
+
+### GAPS IN THE LABELS ARE FINE — corrected advice (2026-08-09)
+
+Aaron: "the gaps in intervals aren't gaps in fencing, it's just that the broadcast has other
+stuff." That reverses the "label contiguously, no gaps" advice given earlier the same day.
+That advice assumed gaps meant SKIPPED FENCING, which would bias the model's implicit prior now
+that CLASS_PRIOR is retired and training runs on natural frequencies. Gaps that are replays,
+crowd shots and graphics contain no fencing to label, so the labelled fraction is a faithful
+sample of fencing time and the natural-frequency argument is satisfied. Label the fencing, skip
+the filler.
+
+It does surface a separate issue: **63% of the demo's predictions on bout 4 (6469 of 10288)
+fall outside labelled fencing**, i.e. the overlay is drawing labels over replays and crowd
+shots. Scoring is unaffected (unlabelled time is excluded), but most of what a viewer watches
+is the model labelling things that are not a bout. Wants an "is this fencing?" gate — cheapest
+version is requiring both fencer slots filled with plausible piste geometry, since close-ups
+give one and crowd shots give none or many.
+
 ### LEARNING CURVE: more labelling still pays, but only a few points (2026-08-09)
 
 `scripts/learning_curve.py --holdout 1`. Fractions are CONTIGUOUS TIME SLICES, not random

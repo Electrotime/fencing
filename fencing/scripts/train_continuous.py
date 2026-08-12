@@ -89,9 +89,11 @@ def clip_dataset_arrays():
             np.array(Y, dtype=np.int64))
 
 
-def train_once(train_ds, weights, epochs, seed, device):
+def train_once(train_ds, weights, epochs, seed, device, pool="mean"):
+    """pool defaults to "mean" to keep older callers byte-identical; the
+    shipped checkpoint uses "last" (see demo_video.POOL_MODE)."""
     torch.manual_seed(seed)
-    model = ActionLSTM().to(device)
+    model = ActionLSTM(pool=pool).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
     lossf = torch.nn.CrossEntropyLoss(
         weight=None if weights is None else torch.tensor(weights, dtype=torch.float32,
