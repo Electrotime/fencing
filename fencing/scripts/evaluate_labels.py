@@ -33,7 +33,7 @@ import mediapipe as mp
 
 import demo_video as D
 from src.action_model import (ActionFrameLSTM, ActionLSTM, CLASS_NAMES,
-                              load_action_model)
+                              N_AGG_FEATURES, N_AGG_WIDE, load_action_model)
 from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD, _landmarks_to_array,
                                _make_landmarker)
@@ -129,29 +129,28 @@ print(f"labels: {LABELS.name} "
       f"({'two-track, blade-priority collapse' if two_track else 'single-track'})")
 
 
-def long_window_probs(model, track):
+def long_window_probs(model, track, opp_track=None):
     """Full class-probability vector for the track's LONG window, or None.
 
-    Mirrors demo_video._classify_window's preprocessing exactly (same gates, same
-    lengths handling) but returns the whole distribution rather than the argmax,
-    which is what prior-correction experiments need.
+    Uses demo_video._window_inputs rather than reimplementing the preprocessing --
+    this function used to be a hand-copy of it, which is exactly how train/serve
+    drift starts. Returns the whole distribution rather than the argmax, which is
+    what the prior and threshold experiments read from the cache.
     """
     kp_seq = np.stack(track.kp)[-D.WINDOW_LONG:]
     mot = np.array(track.motion, dtype=np.float32)[-D.WINDOW_LONG:]
-    real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)
-    if real.sum() < D.MIN_REAL_FRAMES:
+    got = D._window_inputs(kp_seq, mot, D.MIN_REAL_FRAMES)
+    if got is None:
         return None
-    kp = kp_seq[np.argmax(real):]
-    if len(kp) >= 2:
-        step = np.linalg.norm(np.diff(kp[:, :, :2], axis=0), axis=2)
-        if float(np.mean(step < 1e-9)) > D.MAX_FROZEN_FRAC:
-            return None
-    norm = D._normalize_sequence(kp)
-    agg = D._engineered_features(norm, mot)
-    flat = norm.reshape(len(norm), -1).astype(np.float32)
-    n_real = min(len(flat), D.SEQ_LEN)
-    if len(flat) < D.SEQ_LEN:
-        flat = np.concatenate([flat, np.zeros((D.SEQ_LEN - len(flat), D.INPUT_SIZE), np.float32)])
+    flat, agg, n_real = got
+    if D.USE_OPPONENT:
+        opp_got = None
+        if opp_track is not None and len(opp_track.kp) == len(track.kp):
+            opp_got = D._window_inputs(
+                np.stack(opp_track.kp)[-D.WINDOW_LONG:],
+                np.array(opp_track.motion, dtype=np.float32)[-D.WINDOW_LONG:],
+                D.MIN_REAL_FRAMES)
+        agg = D.wide_agg(agg, None if opp_got is None else opp_got[1])
     lengths = torch.tensor([n_real])
     with torch.no_grad():
         logits = model(torch.from_numpy(flat[:D.SEQ_LEN])[None],
@@ -180,7 +179,9 @@ if not _mpath.is_absolute() and not _mpath.exists():
 _pool = _flag_value("--pool", D.POOL_MODE)
 action_model = load_action_model(
     _mpath, device=torch.device("cpu"),
-    cls=ActionFrameLSTM if USE_FRAME else (lambda: ActionLSTM(pool=_pool)))
+    cls=ActionFrameLSTM if USE_FRAME
+    else (lambda: ActionLSTM(pool=_pool,
+                             n_agg=N_AGG_WIDE if D.USE_OPPONENT else N_AGG_FEATURES)))
 print(f"model: {_mpath.name}" + ("" if USE_FRAME else f"  pool={_pool}")
       + ("  [prior DISABLED for this run]" if NO_PRIOR else ""))
 if NO_PRIOR:
@@ -237,7 +238,8 @@ while True:
         for slot in ("A", "B"):
             t = tracks[slot]
             t.label = None
-            D._predict(action_model, t)
+            # opponent track: both slots already have this frame appended
+            D._predict(action_model, t, tracks["B" if slot == "A" else "A"])
             if t.label is not None:
                 shown = ("ready" if (t.label in D.QUIET_CLASSES
                                      or t.conf < D.ACTION_CONF_FLOOR) else t.label)
@@ -246,7 +248,8 @@ while True:
                 # and threshold experiments run offline instead of re-running this
                 # 5-minute loop. Safe to compute here: the track already carries the
                 # properly-estimated pan, so nothing is being recomputed.
-                p = long_window_probs(action_model, t)
+                p = long_window_probs(action_model, t,
+                                      tracks["B" if slot == "A" else "A"])
                 if p is not None:
                     prob_rows.append((slot, frame_idx / fps, p))
     frame_idx += 1

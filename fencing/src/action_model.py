@@ -20,6 +20,12 @@ CLASS_NAMES = ["advance", "lunge", "parry", "retreat", "neutral", "walking"]
 SEQ_LEN = 60          # every clip gets padded/trimmed to this many frames
 INPUT_SIZE = 132      # 33 landmarks x 4 values, flattened per frame
 N_AGG_FEATURES = 6    # engineered clip-level features fed straight into the head
+# With opponent context: 6 own + 6 opponent + 1 presence flag. Fencing is
+# interactive -- advance/retreat come in opposing pairs and 34 of 46 labelled
+# parries happen during a retreat because the opponent is attacking -- but every
+# model before 2026-08-09 classified each fencer in isolation. Measured +2.9 pts
+# mean over three held-out bouts (67.4 -> 70.3).
+N_AGG_WIDE = 2 * N_AGG_FEATURES + 1
 HIDDEN_SIZE = 128     # re-tuned at 488 windows (h64 won at 83 samples; capacity pays
                       # off again with 6x the data: +1.5 pts, lunge ~100%)
 NUM_CLASSES = 6
@@ -117,6 +123,27 @@ def _pick_device() -> torch.device:
 
 PAN_WIDTH = 320.0     # px width the pan was measured at (see pose_pipeline.PAN_DOWNSCALE)
 FORWARD_SCALE = 10.0  # lifts fraction-of-width motion into a ~[-3, 3] feature range
+
+
+def wide_agg(own: np.ndarray, opponent: np.ndarray | None) -> np.ndarray:
+    """[own(6) | opponent(6) | present(1)] -- the ONLY definition of this layout.
+
+    Training (train_shipping), offline scoring (evaluate_labels) and the live demo
+    must all build this identically or the model is served inputs it never saw.
+    Every trustworthy measurement in this project rests on that agreement, so the
+    construction lives here rather than being repeated three times.
+
+    `opponent=None` means the other fencer was not usable for this window -- not
+    detected, or its window failed the frozen/too-short gates. The block is zeroed
+    and the flag drops to 0, so "no opponent" is a state the model can learn
+    rather than a silent lie about a stationary opponent.
+    """
+    own = np.asarray(own, dtype=np.float32).reshape(-1)
+    if opponent is None:
+        return np.concatenate([own, np.zeros(N_AGG_FEATURES, np.float32),
+                               np.zeros(1, np.float32)]).astype(np.float32)
+    opp = np.asarray(opponent, dtype=np.float32).reshape(-1)
+    return np.concatenate([own, opp, np.ones(1, np.float32)]).astype(np.float32)
 
 
 def _engineered_features(kp: np.ndarray, motion: np.ndarray) -> np.ndarray:
@@ -322,7 +349,7 @@ class ActionLSTM(nn.Module):
 
     POOL_MODES = ("mean", "max", "last")
 
-    def __init__(self, pool: str = "mean") -> None:
+    def __init__(self, pool: str = "mean", n_agg: int = N_AGG_FEATURES) -> None:
         """`pool` selects the time reduction. DEFAULTS TO "mean" for a reason:
         every checkpoint trained before 2026-08-09 used it, and all three modes
         have IDENTICAL parameter shapes, so a mismatched mode loads silently and
@@ -350,9 +377,14 @@ class ActionLSTM(nn.Module):
         if pool not in self.POOL_MODES:
             raise ValueError(f"pool must be one of {self.POOL_MODES}, got {pool!r}")
         self.pool = pool
+        # n_agg is N_AGG_WIDE (13) for opponent-aware checkpoints, N_AGG_FEATURES
+        # (6) otherwise. UNLIKE `pool`, a mismatch here is loud -- the head's first
+        # Linear has a different shape, so load_state_dict raises instead of
+        # silently misbehaving. That is why n_agg is safe to infer and pool is not.
+        self.n_agg = n_agg
         self.lstm = nn.LSTM(INPUT_SIZE, HIDDEN_SIZE, batch_first=True)
         self.head = nn.Sequential(
-            nn.Linear(HIDDEN_SIZE + N_AGG_FEATURES, 64),
+            nn.Linear(HIDDEN_SIZE + n_agg, 64),
             nn.ReLU(),
             nn.Dropout(DROPOUT),
             nn.Linear(64, NUM_CLASSES),

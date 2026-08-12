@@ -992,6 +992,92 @@ from 0.25 to 0.90 while the lit fraction falls 36%->20%, which is exactly what n
 discriminative signal looks like. On bout 3 precision moves 0%->33% across the sweep, which is
 what real (if weak) signal looks like.
 
+### OPPONENT CONTEXT WORKS: +2.9 pts, replicated on three bouts (2026-08-09)
+
+**Each fencer was being classified completely independently** — slot A's window never saw slot
+B. Fencing is interactive and the labels prove it: advance/retreat arrive as opposing pairs
+almost always, and 34 of 46 parries happen during a retreat because the opponent is attacking.
+The model was being asked to recognise a RESPONSE without seeing the STIMULUS.
+
+`scripts/exp_opponent.py` pairs each window with the opponent's window at the same timestamp
+(extraction cached `time` and `slot`, so no re-extraction) and appends their 6 engineered
+features: 6 own + 6 opponent + 1 presence flag = 13. Opponent found on 88-96% of windows.
+
+| cont only (clean arm) | own | + opponent |
+|---|---|---|
+| bout 1 | 71.5% | 72.0% |
+| bout 3 | 70.3% | **72.4%** |
+| bout 4 | 60.3% | **66.5%** |
+| **mean** | 67.4% | **70.3%** |
+
+Positive on all three. **And 70.3% beats the currently shipped clips+cont recipe at 68.5%** —
+dropping the clip corpus entirely and adding the opponent is better than keeping clips without
+it.
+
+**THE CLIP CORPUS CANNOT BE NAIVELY MIXED IN.** Clips are single-fencer keypoint files with no
+opponent, so their opponent block is all zeros — which is perfectly correlated with "this came
+from a clip" and is usable as a source shortcut. The presence flag makes the zeros explicit but
+does not fix it: the clips+cont arm scored -3.4 / +2.4 / +2.4, i.e. actively harmful on bout 1.
+The `cont only` arm exists precisely because it cannot cheat, and it is the one to trust.
+
+**SHIPPED as `models/action_opp.pth`** (5 members). `demo_video`: `MODEL_PATH=action_opp.pth`,
+`POOL_MODE="last"`, `USE_OPPONENT=True`, `APPLY_CLASS_PRIOR=False`.
+
+End-to-end on a HELD-OUT bout 1, same pipeline throughout:
+
+| checkpoint | recipe | bout 1 |
+|---|---|---|
+| action_lstm | clips only, mean pool, + prior | 43.4% |
+| action_cont | clips + continuous, last pool | 74.0% |
+| **action_opp** | continuous, last pool, **opponent** | **74.6%** |
+
+advance recall 53% -> 80%. Online (74.6%) came out ABOVE its own offline estimate (72.0%),
+which is explained below and is the good direction.
+
+Implementation notes worth keeping:
+- `wide_agg()` in action_model.py is the ONLY definition of the 13-vector layout. Training,
+  offline scoring and the demo all import it; it used to be the kind of thing that gets
+  hand-copied into three files and then drifts.
+- `_window_inputs()` was split out of `_classify_window` so the OPPONENT's features come from
+  exactly the same gates and normalisation as the fencer's own.
+- **Predict only after BOTH tracks have the current frame.** demo_video used to predict inside
+  the per-slot loop, which would have handed slot A an opponent one frame stale; the
+  frame-alignment guard would then have silently discarded the opponent on every A call and
+  quietly reverted half the predictions to the single-fencer model.
+- A wrong `n_agg` RAISES (the head's Linear changes shape) — unlike `pool`, which loads
+  silently. That difference caught a missed loader during this very change.
+
+**KNOWN train/serve gap, measured and benign so far.** In training, "opponent present" means
+present AND LABELLED at that timestamp (extraction only emits labelled windows), so coverage is
+88-96%. At inference it means present, ~99%. The live model therefore gets slightly MORE
+opponent information than it trained with, which is why end-to-end beat offline by 2.6 pts
+rather than falling short. If that ever inverts, re-extract with opponent features computed
+regardless of label coverage.
+
+### WINDOW LENGTH: null result, 2 s is about right (2026-08-09)
+
+`WINDOW_LONG = 60` had been fixed since the start and never swept. `last` pooling winning
+suggested recent frames carry the signal, and the actions are short (lunge 0.7 s, parry 0.6 s),
+so a shorter window was a live hypothesis. Tested free by slicing the newest k frames out of
+cached windows (`scripts/exp_window.py`; note `tail()` takes a SUFFIX — taking `X[:, :k]` would
+grab the OLDEST frames and silently test the opposite thing).
+
+| frames | seconds | bout 1 | bout 4 |
+|---|---|---|---|
+| 15 | 0.50 | 65.3% | 58.1% |
+| 25 | 0.83 | 69.3% | 60.4% |
+| 35 | 1.17 | 72.9% | 60.3% |
+| 45 | 1.50 | **73.5%** | **63.4%** |
+| 60 (current) | 2.00 | 73.0% | 62.6% |
+
+45 frames edges 60 by +0.5/+0.8, inside the +-0.6-2.4 seed noise. Shorter windows are clearly
+worse — 15 frames costs 8 points. **The hypothesis is wrong and the current window is fine.**
+
+Limitation, stated because it would otherwise be invisible: `agg` still covers the full 2 s in
+every row (the motion tracks were never cached and two features are raw sums), so this isolates
+SEQUENCE length rather than the whole pipeline's window. A win would have justified the
+expensive re-extraction; a null result closes it cheaply, which is what happened.
+
 ### MIRRORING: correct, invariance proven, and NOT WORTH SHIPPING (2026-08-09)
 
 Aaron asked whether the video could be cropped/edited for variation, the way Roboflow

@@ -26,8 +26,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.action_model import (ActionFrameLSTM, ActionLSTM, CLASS_NAMES, INPUT_SIZE,
-                              SEQ_LEN, _engineered_features, frame_logits_to_window,
-                              load_action_model)
+                              N_AGG_WIDE, SEQ_LEN, _engineered_features,
+                              frame_logits_to_window, load_action_model, wide_agg)
 from src.blade_detector import get_blade_tip, load_blade_model
 from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
@@ -35,13 +35,19 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _normalize_sequence)
 from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
 
-# action_cont: trained on the clip corpus PLUS 5352 continuous windows from four
-# labelled bouts (scripts/extract_continuous.py + train_shipping.py --ship).
-# Leave-one-bout-out this recipe measured 60.4% against the clips-only 42.9%, and
-# an end-to-end run on a HELD-OUT bout 1 gave 69.0% against 43.4% for the old
-# checkpoint -- within 1 pt of its offline estimate, so extraction and inference
-# agree. action_lstm.pth (clips only) is kept for comparison, not deleted.
-MODEL_PATH = PROJECT_ROOT / "models" / "action_cont.pth"
+# action_opp: continuous windows from four labelled bouts, `last` pooling, and each
+# fencer given the OPPONENT's features (train_shipping.py --ship --opponent).
+# NO CLIPS -- they are single-fencer files, so their opponent block would be all
+# zeros and perfectly correlated with "came from a clip"; measured harmful (-3.4 on
+# bout 1) versus +0.5/+2.1/+6.2 for continuous-only.
+#
+# End-to-end on a HELD-OUT bout 1, all three the same pipeline:
+#   action_lstm  (clips only, mean pool, + prior)   43.4%
+#   action_cont  (clips+continuous, last pool)      74.0%
+#   action_opp   (continuous, last pool, opponent)  74.6%
+# Both older checkpoints are kept for comparison, not deleted. Note action_lstm is
+# `mean` pooling and 6-agg, so switching back needs POOL_MODE and USE_OPPONENT too.
+MODEL_PATH = PROJECT_ROOT / "models" / "action_opp.pth"
 # The checkpoint's time-reduction mode. MUST match how MODEL_PATH was trained --
 # all modes share the same parameter shapes, so a mismatch loads cleanly and just
 # behaves wrong. `last` measured +4 to +5 pts over `mean` on all three held-out
@@ -49,6 +55,11 @@ MODEL_PATH = PROJECT_ROOT / "models" / "action_cont.pth"
 # lunge 37->56%, advance 30->43%). See ActionLSTM's docstring for the full table.
 # Pre-2026-08-09 checkpoints (action_lstm.pth) are "mean".
 POOL_MODE = "last"
+# Opponent-aware checkpoint: agg is [own(6) | opponent(6) | present(1)] = 13 rather
+# than 6, because each fencer's action is a response to the other's. Measured +2.9
+# pts mean over three held-out bouts. Unlike POOL_MODE a mismatch here is LOUD --
+# the head's first Linear changes shape, so load_state_dict raises.
+USE_OPPONENT = True
 FRAME_MODEL_PATH = PROJECT_ROOT / "models" / "action_frame.pth"  # --frame-model
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
@@ -208,38 +219,60 @@ def _assign_boxes(dets: list[np.ndarray], tracks: dict[str, FencerTrack],
     return slots
 
 
-def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarray,
-                     min_real: int) -> tuple[str | None, float]:
-    """Classify one window of keypoints. Returns (label, confidence) or (None, 0)."""
+def _window_inputs(kp_seq: np.ndarray, motion_seq: np.ndarray, min_real: int):
+    """(flat, agg, n_real) for one fencer's window, or None if it fails the gates.
+
+    Split out of _classify_window so the OPPONENT's features come from exactly the
+    same code path -- same gates, same normalisation, same engineered features. An
+    opponent block built even slightly differently from an own block would be a
+    train/serve mismatch hiding inside a single function.
+    """
     real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)
     if real.sum() < min_real:
-        return None, 0.0
+        return None
     kp = kp_seq[np.argmax(real):]
-
-    # Refuse to classify a skeleton that is mostly carried forward. When a fencer
-    # walks out of frame or gets occluded, pose_pipeline holds low-visibility
-    # joints at their previous position, so the window keeps arriving here as a
-    # plausible-looking but frozen body. Measured on the bout: 40% of `advance`
-    # calls came from windows at a frame edge or >25% frozen, and 14 of them were
-    # classifying a skeleton more than HALF carried forward. Those are not
-    # advances, they are missing data being labelled.
     if len(kp) >= 2:
         step = np.linalg.norm(np.diff(kp[:, :, :2], axis=0), axis=2)
         if float(np.mean(step < 1e-9)) > MAX_FROZEN_FRAC:
-            return None, 0.0
-
+            return None
     norm = _normalize_sequence(kp)
     agg = _engineered_features(norm, motion_seq)
-
     flat = norm.reshape(len(norm), -1).astype(np.float32)
-    n_real = min(len(flat), SEQ_LEN)      # tell the model where the padding starts
+    n_real = min(len(flat), SEQ_LEN)
     if len(flat) >= SEQ_LEN:
         flat = flat[:SEQ_LEN]
     else:
         flat = np.concatenate([flat, np.zeros((SEQ_LEN - len(flat), INPUT_SIZE), np.float32)])
+    return flat, agg, n_real
+
+
+def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarray,
+                     min_real: int, opp: tuple | None = None) -> tuple[str | None, float]:
+    """Classify one window of keypoints. Returns (label, confidence) or (None, 0).
+
+    `opp` is the opponent's (kp_seq, motion_seq) for the SAME frames, or None. It is
+    used only when USE_OPPONENT is on, i.e. when MODEL_PATH points at a 13-agg
+    checkpoint. An opponent whose own window fails the gates counts as absent
+    rather than as a stationary fencer -- see action_model.wide_agg.
+    """
+    # Gates live in _window_inputs now: too few real frames, or a skeleton mostly
+    # carried forward. On the bout, 40% of `advance` calls came from windows at a
+    # frame edge or >25% frozen, 14 of them more than HALF carried forward. Those
+    # are not advances, they are missing data being labelled.
+    got = _window_inputs(kp_seq, motion_seq, min_real)
+    if got is None:
+        return None, 0.0
+    flat, agg, n_real = got
+
+    if USE_OPPONENT:
+        # The opponent goes through the SAME gates. If its window is unusable the
+        # block is zeroed and the presence flag drops -- never a fabricated
+        # stationary opponent, which would read as "they are holding still".
+        opp_got = _window_inputs(*opp, min_real) if opp is not None else None
+        agg = wide_agg(agg, None if opp_got is None else opp_got[1])
 
     # the short window is 25 real frames padded to 60, so 58% of it is zeros --
-    # without the length the model pools across that padding and reads it as a cue 
+    # without the length the model pools across that padding and reads it as a cue
     lengths = torch.tensor([n_real])
     with torch.no_grad():
         logits = model(torch.from_numpy(flat)[None], torch.from_numpy(agg)[None], lengths)
@@ -261,17 +294,36 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
     return CLASS_NAMES[idx], float(probs[idx])
 
 
-def _predict(model: ActionLSTM, track: FencerTrack) -> None:
+def _predict(model: ActionLSTM, track: FencerTrack,
+             opp_track: FencerTrack | None = None) -> None:
     """Multi-scale prediction: short window catches fast actions (parry), long
     window reads sustained ones. A confident fast-action hit on the short window
-    overrides the long-window call; otherwise the long window decides."""
+    overrides the long-window call; otherwise the long window decides.
+
+    `opp_track` is the other fencer's track, needed by opponent-aware checkpoints
+    (USE_OPPONENT). It defaults to None so older single-fencer callers keep
+    working -- but against a 13-agg model that means every window reports "no
+    opponent", which is a valid state yet throws away the whole point. Pass it.
+    """
     kp_full = np.stack(track.kp)
     mot_full = np.array(track.motion, dtype=np.float32)
+    if opp_track is not None and len(opp_track.kp) == len(track.kp):
+        okp = np.stack(opp_track.kp)
+        omot = np.array(opp_track.motion, dtype=np.float32)
+    else:
+        # length mismatch means the two tracks are not frame-aligned, and a
+        # misaligned opponent is worse than none at all
+        okp = omot = None
+
+    def opp_slice(n):
+        return None if okp is None else (okp[-n:], omot[-n:])
 
     long_label, long_conf = _classify_window(
-        model, kp_full[-WINDOW_LONG:], mot_full[-WINDOW_LONG:], MIN_REAL_FRAMES)
+        model, kp_full[-WINDOW_LONG:], mot_full[-WINDOW_LONG:], MIN_REAL_FRAMES,
+        opp_slice(WINDOW_LONG))
     short_label, short_conf = _classify_window(
-        model, kp_full[-WINDOW_SHORT:], mot_full[-WINDOW_SHORT:], MIN_REAL_SHORT)
+        model, kp_full[-WINDOW_SHORT:], mot_full[-WINDOW_SHORT:], MIN_REAL_SHORT,
+        opp_slice(WINDOW_SHORT))
 
     # The override may only ADD fast-class calls, never remove them, so it is the one
     # path that can manufacture parries. Guard: a short window may not overrule a
@@ -364,7 +416,8 @@ def main() -> None:
         # picks up the ensemble members if they are there, else the single checkpoint
         action_model = load_action_model(
             MODEL_PATH, device=torch.device("cpu"),
-            cls=lambda: ActionLSTM(pool=POOL_MODE))
+            cls=lambda: ActionLSTM(pool=POOL_MODE,
+                                   n_agg=N_AGG_WIDE if USE_OPPONENT else 6))
     blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
     if blade_model is None:
         print("(no blade weights found, skipping the blade tip overlay)")
@@ -402,6 +455,7 @@ def main() -> None:
             boxes = _assign_boxes([b for b in (box_a, box_b) if b is not None], tracks, W)
             timestamp = int(idx * 1000 / fps)
 
+            drawn: dict[str, np.ndarray] = {}
             for slot, box in (("A", boxes["A"]), ("B", boxes["B"])):
                 track = tracks[slot]
                 kp = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
@@ -426,9 +480,22 @@ def main() -> None:
                 
                 track.kp.append(kp)
                 track.motion.append((pan, track.last_hip_x))
+                drawn[slot] = kp
 
-                if idx % PREDICT_EVERY == 0 and len(track.kp) >= MIN_REAL_FRAMES:
-                    _predict(action_model, track)
+            # PREDICT ONLY AFTER BOTH TRACKS HAVE THIS FRAME. Predicting inside the
+            # per-slot loop would ask slot A about an opponent that is one frame
+            # behind, and _predict's frame-alignment guard would then discard the
+            # opponent on every A call -- silently reverting to the single-fencer
+            # model for half the predictions.
+            if idx % PREDICT_EVERY == 0:
+                for slot in ("A", "B"):
+                    track = tracks[slot]
+                    if len(track.kp) >= MIN_REAL_FRAMES:
+                        _predict(action_model, track, tracks["B" if slot == "A" else "A"])
+
+            for slot, box in (("A", boxes["A"]), ("B", boxes["B"])):
+                track = tracks[slot]
+                kp = drawn[slot]
                 # draw this fencer
                 color = SLOT_COLORS[slot]
                 if box is not None:

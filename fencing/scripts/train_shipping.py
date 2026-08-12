@@ -43,7 +43,8 @@ sys.path.insert(0, str(PROJECT))
 sys.path.insert(0, str(PROJECT / "scripts"))
 
 from src.action_model import CLASS_NAMES, WEIGHT_DECAY, ActionLSTM, _pick_device
-from train_continuous import TensorWindows, clip_dataset_arrays, load_bouts
+from train_continuous import (CONT_DIR, TensorWindows, clip_dataset_arrays,
+                              load_bouts)
 
 
 def main() -> int:
@@ -58,6 +59,13 @@ def main() -> int:
     # parameter shapes, so loading with the wrong one succeeds silently and behaves
     # wrong. Whatever is used here must match demo_video.POOL_MODE.
     ap.add_argument("--pool", default="last", choices=ActionLSTM.POOL_MODES)
+    # Opponent context: agg becomes [own(6)|opponent(6)|present(1)]. Implies
+    # --no-clips, because clip windows are single-fencer files with no opponent to
+    # pair with, and an all-zero opponent block is perfectly correlated with "came
+    # from a clip" -- a source shortcut. Measured: clips+opponent scored -3.4 on
+    # bout 1 while continuous-only+opponent scored +0.5/+2.1/+6.2.
+    ap.add_argument("--opponent", action="store_true")
+    ap.add_argument("--no-clips", action="store_true")
     a = ap.parse_args()
     if bool(a.holdout) == bool(a.ship):
         print("pick exactly one of --holdout N or --ship")
@@ -71,14 +79,28 @@ def main() -> int:
         print(f"no extracted bout {a.holdout!r}; have {sorted(bouts)}")
         return 1
 
-    cX, cA, cL, cY = clip_dataset_arrays()
-    X = np.concatenate([cX] + [bouts[k]["train"]["X"] for k in use])
-    A = np.concatenate([cA] + [bouts[k]["train"]["agg"] for k in use])
-    L = np.concatenate([cL] + [bouts[k]["train"]["lengths"] for k in use])
-    Y = np.concatenate([cY] + [bouts[k]["train"]["y"] for k in use])
+    use_clips = not (a.no_clips or a.opponent)
+    if a.opponent:
+        from exp_opponent import with_opponent
+        wide = {k: with_opponent(CONT_DIR / f"{k}.npz")[0] for k in use}
+        X = np.concatenate([wide[k]["X"][::a.stride] for k in use])
+        A = np.concatenate([wide[k]["wide"][::a.stride] for k in use])
+        L = np.concatenate([wide[k]["lengths"][::a.stride] for k in use])
+        Y = np.concatenate([wide[k]["y"][::a.stride] for k in use])
+        cY = []
+    else:
+        cX, cA, cL, cY = clip_dataset_arrays()
+        pre = ([cX], [cA], [cL], [cY]) if use_clips else ([], [], [], [])
+        if not use_clips:
+            cY = []
+        X = np.concatenate(pre[0] + [bouts[k]["train"]["X"] for k in use])
+        A = np.concatenate(pre[1] + [bouts[k]["train"]["agg"] for k in use])
+        L = np.concatenate(pre[2] + [bouts[k]["train"]["lengths"] for k in use])
+        Y = np.concatenate(pre[3] + [bouts[k]["train"]["y"] for k in use])
 
     device = _pick_device()
-    print(f"training on clips({len(cY)}) + bouts {use} = {len(Y)} windows")
+    print(f"training on clips({len(cY)}) + bouts {use} = {len(Y)} windows, "
+          f"agg width {A.shape[1]}" + ("  [OPPONENT]" if a.opponent else ""))
     c = Counter(Y.tolist())
     print("  class mix: " + "  ".join(
         f"{n}={c.get(i, 0)}({c.get(i, 0) / len(Y):.0%})" for i, n in enumerate(CLASS_NAMES)))
@@ -88,7 +110,7 @@ def main() -> int:
     ds = TensorWindows(X, A, L, Y)
     for m in range(a.members):
         torch.manual_seed(42 + m)
-        model = ActionLSTM(pool=a.pool).to(device)
+        model = ActionLSTM(pool=a.pool, n_agg=A.shape[1]).to(device)
         opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
         lossf = torch.nn.CrossEntropyLoss()
         dl = DataLoader(ds, batch_size=32, shuffle=True)

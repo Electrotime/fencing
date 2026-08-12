@@ -133,7 +133,8 @@ def main() -> int:
             for slot in ("A", "B"):
                 t = tracks[slot]
                 t.label = None
-                D._predict(action_model, t)
+                # opponent track: both slots already have this frame appended
+                D._predict(action_model, t, tracks["B" if slot == "A" else "A"])
                 if t.label is not None:
                     preds[slot].append((now, t.label, t.conf))
         idx += 1

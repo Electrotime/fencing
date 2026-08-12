@@ -52,3 +52,4 @@ fencing/data/train_continuous/
 # their probability caches. Verification artifacts, regenerable in ~15 min.
 fencing/models/verify_*.pth
 fencing/data/labels/*_probs_verify.npz
+fencing/data/labels/*_probs_verifyopp.npz
