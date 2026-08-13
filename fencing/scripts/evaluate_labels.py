@@ -226,10 +226,14 @@ while True:
 
     if frame_idx % D.PREDICT_EVERY == 0 and frame_idx >= D.WINDOW_LONG:
         for slot in ("A", "B"):
-            t = tracks[slot]
-            t.label = None
+            tracks[slot].label = None
             # opponent track: both slots already have this frame appended
-            D._predict(action_model, t, tracks["B" if slot == "A" else "A"])
+            D._predict(action_model, tracks[slot],
+                       tracks["B" if slot == "A" else "A"])
+        # scored AFTER the gate, so this measures what the demo actually shows
+        D._apply_parry_gate(tracks)
+        for slot in ("A", "B"):
+            t = tracks[slot]
             if t.label is not None:
                 shown = ("ready" if (t.label in D.QUIET_CLASSES
                                      or t.conf < D.ACTION_CONF_FLOOR) else t.label)

@@ -131,10 +131,13 @@ def main() -> int:
         now = idx / fps
         if idx % D.PREDICT_EVERY == 0 and now >= a.start:
             for slot in ("A", "B"):
-                t = tracks[slot]
-                t.label = None
+                tracks[slot].label = None
                 # opponent track: both slots already have this frame appended
-                D._predict(action_model, t, tracks["B" if slot == "A" else "A"])
+                D._predict(action_model, tracks[slot],
+                           tracks["B" if slot == "A" else "A"])
+            D._apply_parry_gate(tracks)
+            for slot in ("A", "B"):
+                t = tracks[slot]
                 if t.label is not None:
                     preds[slot].append((now, t.label, t.conf))
         idx += 1

@@ -77,10 +77,11 @@ that cross-venue is unmeasured for the shipped model.
    held-out bouts. **A THIRD VENUE is now the highest-value labelling**: cross-venue accuracy
    is unmeasurable for the shipped model, and it is the number that most honestly describes
    the demo. Aim for parry-dense footage if there is a choice, since bout 5 diluted parry.
-2. **Parry lamp**: a separately-supervised blade head shown as a SECOND indicator beside
-   footwork, not collapsed into it. Re-run `exp_two_head.py` with `--pool last` AND opponent
-   context first — the existing two-head numbers predate opponent. Bout 5 adds 13 parries and
-   51 extensions, taking the corpus to 76 parries / 138 extensions.
+2. **Parry lamp** — measured 2026-08-13 and NOT shipped. The blade head now carries real signal
+   (precision rises with threshold instead of sitting flat), but at a usable recall it is 15%
+   precision on bout 4, so 85% of lit lamps would be wrong, and the good threshold differs per
+   bout. Labels buy recall, opponent context buys precision; the next lever is a better blade
+   FEATURE, not more of the same labels.
 3. **Filler rejection**, which is now the blocker on the timeline being usable on full
    broadcasts rather than bout segments. Three attempts have failed: the geometric gate (36%
    precision), and duration + confidence gating, which cannot push filler below ~26% of emitted
@@ -96,7 +97,7 @@ staged diff and commits himself.
 
 ## READ THIS BEFORE TRUSTING ANY METRIC HERE
 
-This is the most important section in the file. Eight "improvements" have been measured,
+This is the most important section in the file. Nine "improvements" have been measured,
 believed, and retracted. They come in exactly two shapes.
 
 ### Shape 1 — measuring how the CLIPS WERE CUT, not fencing
@@ -131,7 +132,13 @@ column sitting in the same table.
    retreat, 7 neutral, 5 advance.
 7. **Prior transfer "generalises."** Measured one direction only. The reverse direction
    (bout2-prior → bout 1) scores 24.4%.
-8. **Timeline smoothing "is a clean null"** (2026-08-12). Measured on bout 1 across three
+8. **"Parry precision scales with blade supervision"** (2026-08-13). 9% on held-out bout 4 with
+   189 labels, 28% on held-out bout 3 with 1329 — read as a scaling law and used to justify more
+   parry labelling. But those are DIFFERENT BOUTS with different base rates (5.4% vs 13.8%), so
+   the lifts are 1.7× and 2.0× — essentially the same. A same-bout ablation (`--blade-frac`) put
+   precision at 14% with 189 labels and 15% with 1168. **Precision never scaled; recall did.**
+   Comparing a rate across groups with different base rates is not a comparison.
+9. **Timeline smoothing "is a clean null"** (2026-08-12). Measured on bout 1 across three
    metrics — precision, recall and count error — all flat or worse, and written up as closed. On
    bout 4 it lifts precision 38→47% and cuts count error 158→113. Same for the confidence gate:
    flat on bout 1, the strongest axis on bout 4. Three metrics agreeing on one bout is still one
@@ -1335,9 +1342,11 @@ Re-run with `--pool last` and reported per track:
 
 - **The two-head structure does pay with `last` pooling**: collapsed 71.3% on bout 3 beats the
   single head's 69.8%. With `mean` it did not (65.5%).
-- **Parry precision scales with blade supervision.** Starved (189 labels) the head is at chance;
-  fed (1329) it is 2× base rate. Recall is still only ~6%, so the lamp would rarely light — but
-  this is the first evidence that MORE TWO-TRACK PARRY LABELS could make parry viable.
+- ~~**Parry precision scales with blade supervision.** Starved (189 labels) the head is at
+  chance; fed (1329) it is 2× base rate.~~ **⚠ WRONG — RETRACTED 2026-08-13, see below.** That
+  compared precision across two DIFFERENT held-out bouts with different base rates: 9% against
+  bout 4's 5.4% base is 1.7×, 28% against bout 3's 13.8% base is 2.0×. Almost the same lift. The
+  "scaling" was an artifact of comparing bouts, not of label count.
 
 **A threshold sweep is the right diagnostic for a lamp.** On bout 4 precision stays pinned at 9%
 from 0.25 to 0.90 while the lit fraction falls 36%→20% — exactly what no discriminative signal
@@ -1345,6 +1354,54 @@ looks like. On bout 3 precision moves 0%→33% across the sweep, which is what r
 signal looks like.
 
 **These numbers predate opponent context. Re-run with `--pool last` + opponent before acting.**
+
+### PARRY LAMP, corrected (2026-08-13): labels buy RECALL, opponent buys PRECISION
+
+`exp_two_head.py` gained three things it needed before it could answer this: bout 5 in
+`CSV_FOR` (it would have raised KeyError), an `--opponent` flag threading `N_AGG_WIDE` through
+both heads, and `--opponent` implying no clips (a clip's all-zero opponent block is a perfect
+"came from a clip" shortcut, measured harmful for the single head).
+
+With bout 5 AND opponent, `--pool last`, 2 seeds:
+
+| held out | blade labels | parry lamp | footwork 5-way | collapsed |
+|---|---|---|---|---|
+| bout 4 (base 5.4%) | 189 → **1168** | 9% flat → **15% @ 0.25, 46% @ 0.90** | 64.0 → **75.2%** | 51.8 → **67.7%** |
+| bout 3 (base 13.8%) | 1329 → **2308** | 28% → **65% @ 0.25** | 77.9 → **78.2%** | 71.3 → **73.1%** |
+
+**The shape of the curve is the evidence, not the headline.** On bout 4 precision used to be
+PINNED at 9% from threshold 0.25 to 0.90 while the lit fraction fell 36%→20% — flatness is what
+no discriminative signal looks like, and it is how the original failure was diagnosed. It now
+rises monotonically: 15, 15, 16, 16, 17, **46%**. A threshold that buys precision means the head
+is genuinely ranking real parries above false ones.
+
+**ABLATION — two variables changed at once, so they were separated.** `--blade-frac 0.162` cuts
+blade labels back to the old 189 on the SAME held-out bout, everything else fixed:
+
+| blade labels | precision @0.25 | recall @0.25 | lamp lit |
+|---|---|---|---|
+| 189 (ablated, only 6 parry labels) | **14%** | 11% | 4.4% |
+| 1168 (full) | **15%** | **36%** | 13.8% |
+
+**Precision is identical; recall more than triples.** So:
+
+- **More two-track parry labels buy RECALL.**
+- **Opponent context buys PRECISION** (9% → 15% on bout 4, ~2.8× base).
+
+This is the useful correction, and it retargets the labelling advice: labelling more parries
+makes the lamp light MORE OFTEN on real parries, but does NOT make a lit lamp more trustworthy.
+Only better features/context have done that so far.
+
+**STILL NOT SHIPPED, and the reason is the operating point, not the signal.** At 15% precision
+85% of lit lamps are wrong — unusable for a display where a wrong lamp is the visible failure.
+The usable end differs by bout: bout 3 reaches 65% at threshold 0.25, bout 4 needs 0.90 to reach
+46%, where it lights on 1.2% of windows. **A single shipped threshold will behave differently
+per broadcast** — the same venue-dependence that sank the fencing gate.
+
+Also note the collapsed metric: 67.7% against the single head's 71.3% on the same held-out bout.
+**Two-head is an ADDITIONAL indicator, not a replacement** — which is exactly Aaron's original
+framing ("both can be shown instead of one taking over the other"). Do not swap the six-way
+model out for it.
 
 ### LEARNING CURVE: more labelling still pays, but only a few points
 

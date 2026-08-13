@@ -47,7 +47,8 @@ sys.path.insert(0, str(PROJECT))
 sys.path.insert(0, str(PROJECT / "scripts"))
 
 from src.action_model import (CLASS_NAMES, DROPOUT, HIDDEN_SIZE, INPUT_SIZE,
-                              N_AGG_FEATURES, WEIGHT_DECAY, _pick_device)
+                              N_AGG_FEATURES, N_AGG_WIDE, WEIGHT_DECAY, _pick_device)
+from exp_opponent import with_opponent
 from train_continuous import clip_dataset_arrays
 
 CONT = PROJECT / "data" / "train_continuous"
@@ -57,7 +58,12 @@ BLADE = ["none", "parry", "extension"]
 F_IX = {n: i for i, n in enumerate(FOOT)}
 B_IX = {n: i for i, n in enumerate(BLADE)}
 CSV_FOR = {"1": "bout1_intervals.csv", "2": "bout2_intervals.csv",
-           "3": "bout3_intervals_2track.csv", "4": "bout4_intervals_2track.csv"}
+           "3": "bout3_intervals_2track.csv", "4": "bout4_intervals_2track.csv",
+           # bout 5 is two-track, so BOTH tracks are known for all 144 intervals.
+           # It is the test of this experiment's own prediction: holding out bout 4
+           # previously left just 189 blade labels in training (parry lamp at
+           # chance), and bout 5 feeds exactly that starved arm.
+           "5": "bout5_intervals_2track.csv"}
 
 
 def bout_labels(stem):
@@ -84,7 +90,7 @@ def bout_labels(stem):
     return out
 
 
-def load_bout(stem, stride=1):
+def load_bout(stem, stride=1, opponent=False):
     d = np.load(CONT / f"{stem}.npz")
     lab = bout_labels(stem)
     fw = np.full(len(d["y"]), -1, dtype=np.int64)
@@ -94,7 +100,13 @@ def load_bout(stem, stride=1):
             if a <= float(t) < b:
                 fw[i], bl[i] = fi, bi
                 break
-    full = dict(X=d["X"], agg=d["agg"], lengths=d["lengths"], y=d["y"], fw=fw, bl=bl)
+    # The shipped single-head model reads the OPPONENT's engineered features, worth
+    # +2.9 pts there. Without this the two-head arm is handicapped against the model
+    # it is being compared to, and a parry is precisely the action whose stimulus is
+    # on the other fencer -- 34 of 63 parries happen during a retreat because the
+    # opponent is attacking.
+    agg = with_opponent(CONT / f"{stem}.npz")[0]["wide"] if opponent else d["agg"]
+    full = dict(X=d["X"], agg=agg, lengths=d["lengths"], y=d["y"], fw=fw, bl=bl)
     return {"eval": full, "train": {k: v[::stride] for k, v in full.items()}}
 
 
@@ -114,12 +126,12 @@ class TwoHead(nn.Module):
     """Shared trunk, two heads. Trunk identical to ActionLSTM so the comparison
     isolates the head structure rather than capacity."""
 
-    def __init__(self, pool="last"):
+    def __init__(self, pool="last", n_agg=N_AGG_FEATURES):
         super().__init__()
         self.pool_mode = pool
         self.lstm = nn.LSTM(INPUT_SIZE, HIDDEN_SIZE, batch_first=True)
         mk = lambda n: nn.Sequential(
-            nn.Linear(HIDDEN_SIZE + N_AGG_FEATURES, 64), nn.ReLU(),
+            nn.Linear(HIDDEN_SIZE + n_agg, 64), nn.ReLU(),
             nn.Dropout(DROPOUT), nn.Linear(64, n))
         self.foot, self.blade = mk(len(FOOT)), mk(len(BLADE))
 
@@ -155,21 +167,33 @@ def main() -> int:
     # variable -- the question being whether labelling more parries would actually
     # make the lamp usable, or whether it plateaus at chance.
     ap.add_argument("--blade-frac", type=float, default=1.0)
+    # Give both heads the opponent's engineered features, as the shipped single-head
+    # model does. IMPLIES NO CLIPS: a clip is a single-fencer file, so its opponent
+    # block is all zeros and perfectly correlated with "came from a clip" -- measured
+    # harmful (-3.4 on bout 1) for the single head, and there is no reason it would
+    # behave differently here.
+    ap.add_argument("--opponent", action="store_true")
     a = ap.parse_args()
 
-    bouts = {s: load_bout(s, a.stride) for s in CSV_FOR if (CONT / f"{s}.npz").exists()}
+    bouts = {s: load_bout(s, a.stride, a.opponent)
+             for s in CSV_FOR if (CONT / f"{s}.npz").exists()}
     tr = [k for k in bouts if k != a.holdout]
-    cX, cA, cL, cY = clip_dataset_arrays()
-    # clips: parry -> blade only; everything else -> footwork only
-    c_fw = np.array([F_IX.get(CLASS_NAMES[c], -1) for c in cY], dtype=np.int64)
-    c_bl = np.array([B_IX["parry"] if CLASS_NAMES[c] == "parry" else -1 for c in cY],
-                    dtype=np.int64)
+    n_agg = N_AGG_WIDE if a.opponent else N_AGG_FEATURES
 
-    X = np.concatenate([cX] + [bouts[k]["train"]["X"] for k in tr])
-    A = np.concatenate([cA] + [bouts[k]["train"]["agg"] for k in tr])
-    L = np.concatenate([cL] + [bouts[k]["train"]["lengths"] for k in tr])
-    F = np.concatenate([c_fw] + [bouts[k]["train"]["fw"] for k in tr])
-    B = np.concatenate([c_bl] + [bouts[k]["train"]["bl"] for k in tr])
+    parts_X, parts_A, parts_L, parts_F, parts_B = [], [], [], [], []
+    if not a.opponent:
+        cX, cA, cL, cY = clip_dataset_arrays()
+        # clips: parry -> blade only; everything else -> footwork only
+        parts_X, parts_A, parts_L = [cX], [cA], [cL]
+        parts_F = [np.array([F_IX.get(CLASS_NAMES[c], -1) for c in cY], dtype=np.int64)]
+        parts_B = [np.array([B_IX["parry"] if CLASS_NAMES[c] == "parry" else -1
+                             for c in cY], dtype=np.int64)]
+
+    X = np.concatenate(parts_X + [bouts[k]["train"]["X"] for k in tr])
+    A = np.concatenate(parts_A + [bouts[k]["train"]["agg"] for k in tr])
+    L = np.concatenate(parts_L + [bouts[k]["train"]["lengths"] for k in tr])
+    F = np.concatenate(parts_F + [bouts[k]["train"]["fw"] for k in tr])
+    B = np.concatenate(parts_B + [bouts[k]["train"]["bl"] for k in tr])
 
     if a.blade_frac < 1.0:
         rng = np.random.default_rng(0)
@@ -180,7 +204,9 @@ def main() -> int:
         B[drop] = -1
 
     device = _pick_device()
-    print(f"held out bout {a.holdout}; train on clips + bouts {tr} = {len(F)} windows")
+    print(f"held out bout {a.holdout}; train on "
+          f"{'bouts' if a.opponent else 'clips + bouts'} {tr} = {len(F)} windows"
+          f"{'  [OPPONENT, no clips]' if a.opponent else ''}")
     print(f"  footwork labelled on {int((F >= 0).sum())}, blade labelled on "
           f"{int((B >= 0).sum())}")
     print("  blade mix: " + "  ".join(
@@ -202,7 +228,7 @@ def main() -> int:
     accs, precs, recs, foots, sweeps = [], [], [], [], []
     for s in range(a.seeds):
         torch.manual_seed(42 + s)
-        m = TwoHead(a.pool).to(device)
+        m = TwoHead(a.pool, n_agg).to(device)
         opt = torch.optim.Adam(m.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
         # ignore_index=-1 is what makes partially-labelled sources usable
         lf = nn.CrossEntropyLoss(ignore_index=-1)

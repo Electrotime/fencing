@@ -130,6 +130,14 @@ CLASS_PRIOR = {"advance": 0.184, "lunge": 0.045, "parry": 0.017,
 # NOT work here (it put lunge at 0.635 vs a true 0.027) -- the prior has to come
 # from labels.
 
+# A parry is a RESPONSE: across bouts 3-5, 86% of labelled parries have the opponent
+# attacking at the same moment (76% lunge+extension, 10% advance+extension). Requiring
+# that at decision time roughly DOUBLES parry precision and lifts overall accuracy on
+# two held-out bouts at two venues -- see _apply_parry_gate for the numbers.
+PARRY_NEEDS_ATTACKER = True
+PARRY_OPP_LUNGE_MIN = 0.20  # best-or-tied on both bouts; precision is flat 0.2-0.5 on
+                            # bout 4 and still rising on bout 5, so this is the safe end
+
 MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps are
                         # exactly zero, i.e. held over from the previous frame by the
                         # visibility fallback. Partial/occluded bodies were producing
@@ -160,6 +168,7 @@ class FencerTrack:
         self.last_hip_x = 0.5
         self.label: str | None = None
         self.conf = 0.0
+        self.probs: np.ndarray | None = None  # long-window distribution, for the parry gate
         self.counts: dict[str, int] = {}  # how often each label got emitted
 
 
@@ -258,7 +267,8 @@ def _window_inputs(kp_seq: np.ndarray, motion_seq: np.ndarray, min_real: int):
 
 
 def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarray,
-                     min_real: int, opp: tuple | None = None) -> tuple[str | None, float]:
+                     min_real: int,
+                     opp: tuple | None = None) -> tuple[str | None, float, np.ndarray | None]:
     """Classify one window of keypoints. Returns (label, confidence) or (None, 0).
 
     `opp` is the opponent's (kp_seq, motion_seq) for the SAME frames, or None. It is
@@ -272,7 +282,7 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
     # are not advances, they are missing data being labelled.
     got = _window_inputs(kp_seq, motion_seq, min_real)
     if got is None:
-        return None, 0.0
+        return None, 0.0, None
     flat, agg, n_real = got
 
     if USE_OPPONENT:
@@ -302,7 +312,9 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
         probs = probs / probs.sum().clamp(min=1e-12)
 
     idx = int(probs.argmax())
-    return CLASS_NAMES[idx], float(probs[idx])
+    # the full vector goes back too: the parry gate needs the OPPONENT's lunge
+    # probability, not just their argmax label
+    return CLASS_NAMES[idx], float(probs[idx]), probs.numpy()
 
 
 def _predict(model: ActionLSTM, track: FencerTrack,
@@ -329,12 +341,13 @@ def _predict(model: ActionLSTM, track: FencerTrack,
     def opp_slice(n):
         return None if okp is None else (okp[-n:], omot[-n:])
 
-    long_label, long_conf = _classify_window(
+    long_label, long_conf, long_probs = _classify_window(
         model, kp_full[-WINDOW_LONG:], mot_full[-WINDOW_LONG:], MIN_REAL_FRAMES,
         opp_slice(WINDOW_LONG))
-    short_label, short_conf = _classify_window(
+    short_label, short_conf, _ = _classify_window(
         model, kp_full[-WINDOW_SHORT:], mot_full[-WINDOW_SHORT:], MIN_REAL_SHORT,
         opp_slice(WINDOW_SHORT))
+    track.probs = long_probs
 
     # The override may only ADD fast-class calls, never remove them, so it is the one
     # path that can manufacture parries. Guard: a short window may not overrule a
@@ -354,6 +367,105 @@ def _predict(model: ActionLSTM, track: FencerTrack,
         track.label, track.conf = long_label, long_conf
     if track.label is not None:
         track.counts[track.label] = track.counts.get(track.label, 0) + 1
+
+
+def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
+    """Drop a `parry` call unless the OPPONENT looks like they are attacking.
+
+    Aaron's observation, and the labels back it hard. Across bouts 3-5, of 67
+    labelled parries the opponent is simultaneously:
+
+        lunge + extension    76%
+        advance + extension  10%     -> 86% attacking in some form
+
+    A parry is a RESPONSE; it essentially does not happen unless someone is coming
+    at you. The reverse is much weaker (only 58% of lunges draw a parry), so this is
+    used one-directionally: opponent-attacking gates parry, never the other way.
+
+    Why a gate rather than a feature: the model already receives the opponent's six
+    engineered features, and that is what lifted parry precision 9% -> 15%. What it
+    does NOT receive is the opponent's predicted CLASS, because both fencers are
+    classified independently. This couples them at decision time, which is the
+    cheapest possible version of joint decoding.
+
+    Measured on two held-out bouts at two different venues, offline on cached
+    probabilities (see CLAUDE.md):
+
+        bout 4   overall 67.4% -> 68.2%,  parry precision 18% -> 38%
+        bout 5   overall 57.0% -> 58.7%,  parry precision 12% -> 27%
+
+    Overall accuracy goes UP as well as parry precision -- the suppressed parries
+    were mostly wrong, and the runner-up class is more often right. Threshold 0.2 is
+    best-or-tied on both bouts, which is what a venue-independent rule looks like;
+    contrast the fencing gate, whose best cue INVERTED between venues.
+
+    Runs after BOTH tracks have predicted, so each fencer sees the other's
+    distribution for the same frame.
+    """
+    if not PARRY_NEEDS_ATTACKER:
+        return
+    lunge_i = CLASS_NAMES.index("lunge")
+    for slot, track in tracks.items():
+        if track.label != "parry" or track.probs is None:
+            continue
+        opp = tracks.get("B" if slot == "A" else "A")
+        # No opponent tracked at all -> no evidence of an attack -> no parry. That is
+        # the conservative reading, and a parry with nobody visible to parry is
+        # exactly the false positive this exists to remove.
+        opp_attack = 0.0 if opp is None or opp.probs is None else float(opp.probs[lunge_i])
+        if opp_attack >= PARRY_OPP_LUNGE_MIN:
+            continue
+        # demote to the runner-up of this fencer's own long window
+        alt = track.probs.copy()
+        alt[CLASS_NAMES.index("parry")] = -1.0
+        idx = int(alt.argmax())
+        track.label, track.conf = CLASS_NAMES[idx], float(alt[idx])
+
+
+def _self_test_parry_gate() -> None:
+    """The gate must fire only on parry, and only when the opponent is not attacking."""
+    def mk(label, probs):
+        t = FencerTrack()
+        t.label, t.probs = label, np.array(probs, dtype=np.float32)
+        t.conf = float(t.probs.max())
+        return t
+
+    def probs(**kw):
+        v = np.full(len(CLASS_NAMES), 0.01, dtype=np.float32)
+        for k, x in kw.items():
+            v[CLASS_NAMES.index(k)] = x
+        return v
+
+    # opponent clearly lunging -> parry SURVIVES
+    tr = {"A": mk("parry", probs(parry=0.6, retreat=0.3)),
+          "B": mk("lunge", probs(lunge=0.8))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "parry", tr["A"].label
+
+    # opponent NOT attacking -> parry demoted to its own runner-up
+    tr = {"A": mk("parry", probs(parry=0.6, retreat=0.3)),
+          "B": mk("neutral", probs(neutral=0.9, lunge=0.02))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "retreat", tr["A"].label
+    assert abs(tr["A"].conf - 0.3) < 1e-5
+
+    # a NON-parry label is never touched, however quiet the opponent
+    tr = {"A": mk("lunge", probs(lunge=0.7)),
+          "B": mk("neutral", probs(neutral=0.9, lunge=0.0))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "lunge"
+
+    # no opponent distribution at all -> treated as "nobody attacking", parry dropped
+    tr = {"A": mk("parry", probs(parry=0.6, retreat=0.3)), "B": FencerTrack()}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "retreat", tr["A"].label
+
+    # exactly at threshold survives (>=, not >)
+    tr = {"A": mk("parry", probs(parry=0.6, retreat=0.3)),
+          "B": mk("neutral", probs(neutral=0.5, lunge=PARRY_OPP_LUNGE_MIN))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "parry"
+    print("self-test ok: parry gate fires only on parry, only without an attacker")
 
 
 def _self_test_assign() -> None:
@@ -401,6 +513,7 @@ def _self_test_assign() -> None:
 def main() -> None:
     if "--self-test" in sys.argv:
         _self_test_assign()
+        _self_test_parry_gate()
         return
     argv = [a for a in sys.argv[1:] if a != "--frame-model"]
     use_frame = "--frame-model" in sys.argv
@@ -503,6 +616,9 @@ def main() -> None:
                     track = tracks[slot]
                     if len(track.kp) >= MIN_REAL_FRAMES:
                         _predict(action_model, track, tracks["B" if slot == "A" else "A"])
+                # both fencers now hold a distribution for THIS frame, which is what
+                # the parry gate needs -- it asks whether the other one is attacking
+                _apply_parry_gate(tracks)
 
             for slot, box in (("A", boxes["A"]), ("B", boxes["B"])):
                 track = tracks[slot]
