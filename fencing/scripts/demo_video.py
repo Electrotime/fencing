@@ -35,19 +35,30 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _normalize_sequence)
 from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
 
-# action_opp: continuous windows from four labelled bouts, `last` pooling, and each
-# fencer given the OPPONENT's features (train_shipping.py --ship --opponent).
+# action_opp5: continuous windows from FIVE labelled bouts (bout 5 is a second
+# VENUE), `last` pooling, and each fencer given the OPPONENT's features
+# (train_shipping.py --ship --opponent).
 # NO CLIPS -- they are single-fencer files, so their opponent block would be all
 # zeros and perfectly correlated with "came from a clip"; measured harmful (-3.4 on
 # bout 1) versus +0.5/+2.1/+6.2 for continuous-only.
 #
-# End-to-end on a HELD-OUT bout 1, all three the same pipeline:
-#   action_lstm  (clips only, mean pool, + prior)   43.4%
-#   action_cont  (clips+continuous, last pool)      74.0%
-#   action_opp   (continuous, last pool, opponent)  74.6%
-# Both older checkpoints are kept for comparison, not deleted. Note action_lstm is
+# End-to-end on a HELD-OUT bout 1, all four the same pipeline:
+#   action_lstm  (clips only, mean pool, + prior)     43.4%
+#   action_cont  (clips+continuous, last pool)        74.0%
+#   action_opp   (4 bouts, last pool, opponent)       74.6%
+#   action_opp5  (5 bouts, adds a second venue)       76.4%
+# Adding bout 5 was verified as a matched A/B -- same recipe, only the training
+# corpus differs -- on TWO held-out bouts, because a five-bout model cannot be
+# honestly scored on any of the five:
+#   held-out bout 1:  74.6% -> 76.4%  (+1.8)
+#   held-out bout 4:  67.6% -> 71.3%  (+3.7, on 3822 windows)
+# Every older checkpoint is kept for comparison, not deleted. Note action_lstm is
 # `mean` pooling and 6-agg, so switching back needs POOL_MODE and USE_OPPONENT too.
-MODEL_PATH = PROJECT_ROOT / "models" / "action_opp.pth"
+#
+# The cross-venue figure this replaces is SPENT: action_opp scored 58.1% on bout 5
+# while bout 5 was unseen, and now that bout 5 is in training that measurement can
+# never be repeated. A third venue is needed for the next honest one.
+MODEL_PATH = PROJECT_ROOT / "models" / "action_opp5.pth"
 # The checkpoint's time-reduction mode. MUST match how MODEL_PATH was trained --
 # all modes share the same parameter shapes, so a mismatch loads cleanly and just
 # behaves wrong. `last` measured +4 to +5 pts over `mean` on all three held-out

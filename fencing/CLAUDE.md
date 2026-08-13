@@ -17,7 +17,7 @@ each other** — a checkpoint's pooling mode and feature width are part of its i
 
 | constant | value | note |
 |---|---|---|
-| `MODEL_PATH` | `models/action_opp.pth` (5 members) | continuous-only training, opponent context |
+| `MODEL_PATH` | `models/action_opp5.pth` | FIVE bouts incl. a second venue, continuous only |
 | `POOL_MODE` | `"last"` | a wrong mode loads SILENTLY (identical parameter shapes) |
 | `USE_OPPONENT` | `True` | 13 agg features; a wrong `n_agg` RAISES |
 | `APPLY_CLASS_PRIOR` | `False` | retired 2026-08-09, no longer needed |
@@ -31,17 +31,20 @@ checkpoint never trained on. Random is 16.7%.
 |---|---|---|
 | `action_lstm` | clips only, mean pool, + class prior | 43.4% |
 | `action_cont` | clips + continuous, last pool | 74.0% |
-| **`action_opp`** | continuous only, last pool, **opponent** | **74.6%** |
+| `action_opp` | 4 bouts, last pool, **opponent** | 74.6% |
+| **`action_opp5`** | **5 bouts — adds a second VENUE** | **76.4%** |
 
 Held-out per class on `action_opp`: advance recall 53% → **80%**, retreat 96%, walking 95%,
 neutral 39%, lunge 33%, **parry 12%**.
 
 Leave-one-bout-out mean across four bouts: **70.3%** (was 42.9% on clips alone).
 
-**ON A NEW VENUE IT IS 58.1%** (bout 5, never trained on, shipped checkpoint — so honest with
-no verify run needed). Every other figure above holds the broadcast style constant. Quote
-74.6% for "held-out bout, same kind of footage" and **58.1% for "footage we have never seen"**;
-they answer different questions and the gap is the cost of a new venue.
+**ON A NEW VENUE IT WAS 58.1%** — `action_opp` scored on bout 5 while bout 5 was still unseen.
+**That measurement is now SPENT**: bout 5 is in `action_opp5`'s training set, so it can never be
+repeated, and no current checkpoint has an honest cross-venue number. 58.1% stands as the
+historical figure for "four-bout model, unfamiliar venue"; **a third venue is what buys the
+next one.** Until then, quote 76.4% as "held-out bout, familiar broadcast style" and be explicit
+that cross-venue is unmeasured for the shipped model.
 
 ### What is open
 
@@ -70,12 +73,10 @@ they answer different questions and the gap is the cost of a new venue.
 
 ### Next steps
 
-1. **Train on bout 5.** ✓ labels landed 2026-08-12. `extract_continuous.py` on `5.mp4`, then
-   `train_shipping.py --ship` with all five bouts. This is the highest-value single step: it is
-   the only training data from a second venue, and cross-venue accuracy (58.1%) is now the
-   weakest honest number in the project. Keep a `--holdout 5` checkpoint so the cross-venue
-   figure stays measurable afterwards — once bout 5 is in training, 58.1% can never be
-   re-measured on it.
+1. **Train on bout 5.** ✓ DONE 2026-08-13 — shipped as `action_opp5.pth`, +1.8/+3.7 on two
+   held-out bouts. **A THIRD VENUE is now the highest-value labelling**: cross-venue accuracy
+   is unmeasurable for the shipped model, and it is the number that most honestly describes
+   the demo. Aim for parry-dense footage if there is a choice, since bout 5 diluted parry.
 2. **Parry lamp**: a separately-supervised blade head shown as a SECOND indicator beside
    footwork, not collapsed into it. Re-run `exp_two_head.py` with `--pool last` AND opponent
    context first — the existing two-head numbers predate opponent. Bout 5 adds 13 parries and
@@ -220,7 +221,8 @@ fencing/
 │   ├── blade_dataset/              downloaded back from Roboflow
 │   └── diagnostics/                annotated debug frames — GITIGNORED
 ├── models/
-│   ├── action_opp.pth  (+ .m0–.m4) ← SHIPPED: continuous, last pool, opponent
+│   ├── action_opp5.pth (+ .m0–.m4) ← SHIPPED: FIVE bouts (two venues), last pool, opponent
+│   ├── action_opp.pth  (+ .m0–.m4)    four bouts, one venue — the 58.1% cross-venue model
 │   ├── action_cont.pth (+ .m0–.m4)    clips + continuous, last pool
 │   ├── action_lstm.pth (+ .m0–.m4)    clips only, MEAN pool — historical, kept for comparison
 │   ├── action_frame.pth               per-frame model — DEGENERATE, do not route to it
@@ -1614,6 +1616,67 @@ Bout 4 read advance 72/34; bout 5 reads 18/59. **Counts are unreliable in BOTH
 directions**, driven by whichever error dominates that footage — false positives on
 bout 4, missed advances on bout 5. Do not report a count without the true count beside
 it.
+
+#### SHIPPED `action_opp5.pth` — a second venue helps, replicated on two held-out bouts
+
+`extract_continuous.py` on 5.mp4 gives **3078 windows**, taking the continuous corpus from
+5352 to **8430** (+58%).
+
+A five-bout model cannot be honestly scored on any of the five, so "does bout 5 help?" was
+answered as a **matched A/B**: identical recipe, identical held-out bout, the only difference
+being whether bout 5 is in the training set.
+
+| held out | without bout 5 | **with bout 5** | Δ | training windows |
+|---|---|---|---|---|
+| bout 1 | 74.6% | **76.4%** | +1.8 | 512 → 2521 |
+| bout 4 | 67.6% | **71.3%** | **+3.7** | 512 → 1538 |
+
+Trust the bout 4 row: 3822 scored windows, and +3.7 is outside the ±0.6-2.4 seed noise this
+project normally sees. Bout 1's +1.8 is marginal alone but points the same way. Contrast the
+mirroring result, rejected at +0.5 mean against ±1.5 noise.
+
+Per class on held-out bout 4, precision / recall:
+
+| class | without bout 5 | with bout 5 |
+|---|---|---|
+| advance | 62% / 65% | **70% / 73%** |
+| retreat | 70% / 54% | 70% / **74%** |
+| lunge | 60% / 46% | **65% / 56%** |
+| walking | 86% / 85% | **92%** / 78% |
+| parry | 22% / 21% | **29%** / 19% |
+
+**Bout 5 improved the OTHER venue too**, which was not the expected outcome — the risk was that
+a differently-framed broadcast would drag the majority style down. advance +8/+8 and retreat
+recall +20 on bout 4 say the opposite: more variety helped generalisation rather than diluting
+it.
+
+**Parry is the exception and it went the wrong way on recall** (21% → 19%, precision 22% → 29%).
+Bout 5 carries only **70 parry windows against bout 4's 207**, so it dilutes the class. Confirms
+that the parry lamp needs parry-DENSE labelling, not more footage in general — more of the same
+kind of bout makes parry relatively rarer.
+
+`models/action_opp.pth` is kept for comparison, not deleted, like every checkpoint before it —
+and it is the ONLY checkpoint with an honest cross-venue number attached to it (58.1% on bout 5
+before bout 5 entered training), so do not delete it.
+
+**Shipped with `--members 5`**, matching `action_opp` and `action_cont`. The default is 4, and
+the first `--ship` run produced a 4-member ensemble before this was noticed. The A/B above is
+unaffected — all four verify checkpoints are 4-member, so it was like for like — and the
+ensemble exists for CONSISTENCY rather than accuracy (measured 2.4x variance reduction), so
+shipping one member short of the predecessor would have been a silent regression in the one
+property it is there to provide.
+
+**Degeneracy check on the shipped checkpoint** (offline, over all 8430 cached windows; accuracy
+is circular because it trained on them, but the class DISTRIBUTION is still diagnostic):
+
+| | advance | lunge | parry | retreat | neutral | walking |
+|---|---|---|---|---|---|---|
+| predicted | 24% | 5% | 3% | 19% | 14% | 36% |
+| true | 23% | 6% | 4% | 18% | 15% | 36% |
+
+No class swallows the others — the failure mode that `lunge` showed before the prior correction
+and `advance` showed on bout 3. Training at natural frequencies keeps the output calibrated,
+which is exactly why `APPLY_CLASS_PRIOR` could be retired.
 
 **Three source anomalies, resolved and recorded rather than silently fixed:**
 
