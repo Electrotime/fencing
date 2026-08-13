@@ -17,9 +17,8 @@ Scoring rules:
     quiet classes / low confidence) are reported, because they answer different
     questions
 """
-import csv
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -32,8 +31,9 @@ sys.path.insert(0, str(PROJECT / "scripts"))
 import mediapipe as mp
 
 import demo_video as D
-from src.action_model import (ActionFrameLSTM, ActionLSTM, CLASS_NAMES,
-                              N_AGG_FEATURES, N_AGG_WIDE, load_action_model)
+from src.action_model import (ActionFrameLSTM, ActionLSTM, N_AGG_FEATURES,
+                              N_AGG_WIDE, load_action_model)
+from src.labels import load_intervals, UNSCORABLE
 from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD, _landmarks_to_array,
                                _make_landmarker)
@@ -82,11 +82,10 @@ LABELS = (Path(_args[1]) if len(_args) > 1
           else PROJECT / "data" / "labels" / "bout1_intervals.csv")
 CACHE_OUT = (PROJECT / "data" / "labels" /
              f"{VIDEO.stem}_probs{'_frame' if USE_FRAME else ''}{TAG}.npz")
-# `extension` is not one of the six classes (it lives on as the arm-reach FEATURE),
-# so the model can never emit it; scoring those windows would measure the wrong
-# thing. Counted and excluded.
-UNSCORABLE = {"extension"}
-SLOT_OF = {"left": "A", "right": "B"}
+# UNSCORABLE (`extension` -- a real blade action, but not one of the six classes, so
+# the model can never emit it) and the left/right -> A/B slot map both come from
+# src.labels now. Windows labelled with it are counted and excluded rather than
+# scored as misses.
 
 # ---- ground truth ----------------------------------------------------------
 # Accepts both schemas. A TWO-TRACK file (fencer,start,end,footwork,blade) is
@@ -111,20 +110,11 @@ SLOT_OF = {"left": "A", "right": "B"}
 # bout 3 ten of fourteen lunges are written `lunge` + `arm ext`, so a naive
 # blade-priority collapse silently deleted almost every lunge from a bout labelled
 # specifically for its lunges. Fall through to footwork for anything unemittable.
-def _collapse(row, two_track):
-    if not two_track:
-        return row["label"].strip()
-    blade = row["blade"].strip()
-    return blade if blade in CLASS_NAMES else row["footwork"].strip()
-
-
-truth = defaultdict(list)          # slot -> [(start, end, label)]
-with open(LABELS, encoding="utf-8") as f:
-    rdr = csv.DictReader(r for r in f if not r.startswith("#"))
-    two_track = "footwork" in (rdr.fieldnames or [])
-    for row in rdr:
-        truth[SLOT_OF[row["fencer"]]].append(
-            (float(row["start"]), float(row["end"]), _collapse(row, two_track)))
+# The parser and the collapse rule now live in src/labels.py, because this file,
+# calibrate_gate.py and bout_timeline.py all need them and a hand-copied third copy
+# is how train/serve drift starts. Verified identical on all seven label files
+# before the move.
+truth, two_track = load_intervals(LABELS)   # slot -> [(start, end, label)]
 print(f"labels: {LABELS.name} "
       f"({'two-track, blade-priority collapse' if two_track else 'single-track'})")
 
