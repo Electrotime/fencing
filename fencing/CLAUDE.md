@@ -8,7 +8,7 @@
 
 ---
 
-## CURRENT STATE (2026-08-12)
+## CURRENT STATE (2026-08-13)
 
 ### Shipped demo configuration
 
@@ -38,6 +38,11 @@ neutral 39%, lunge 33%, **parry 12%**.
 
 Leave-one-bout-out mean across four bouts: **70.3%** (was 42.9% on clips alone).
 
+**ON A NEW VENUE IT IS 58.1%** (bout 5, never trained on, shipped checkpoint — so honest with
+no verify run needed). Every other figure above holds the broadcast style constant. Quote
+74.6% for "held-out bout, same kind of footage" and **58.1% for "footage we have never seen"**;
+they answer different questions and the gap is the cost of a new venue.
+
 ### What is open
 
 1. **`parry`** — the long-standing worst class, and no longer hopeless. See
@@ -50,6 +55,11 @@ Leave-one-bout-out mean across four bouts: **70.3%** (was 42.9% on clips alone).
    stillness*, so slow MOVEMENT reading as neutral is a genuine error, not a labelling
    disagreement.
 3. **`lunge`** — 33% recall on held-out bout 1. Transient, same shape of problem as parry.
+3b. **`advance` → `walking` at a new venue.** 282 of bout 5's 869 true advances, by far its
+   largest error. These two classes are separated only by posture, via the crouch feature
+   (knee angle ~140° fencing vs ~164° upright), and a different camera height shifts exactly
+   that measurement. **The most concrete lead for what breaks off-venue, and it is one feature
+   deep.** Bout 5 is now available to train on, which is the first thing to try.
 4. **Phantom labels over broadcast filler.** 63% of the demo's predictions on bout 4 fall
    outside labelled fencing — the overlay confidently labels replays, crowd shots and graphics.
    Per-window scoring never sees this (unlabelled time is excluded) but it is most of what a
@@ -60,13 +70,16 @@ Leave-one-bout-out mean across four bouts: **70.3%** (was 42.9% on clips alone).
 
 ### Next steps
 
-1. **Aaron: label ~10 minutes from a DIFFERENT VENUE**, two-track format
-   (`fencer,start,end,footwork,blade`), every parry marked. Gaps for broadcast filler are fine
-   and correct. A different venue is the only thing that tests the hand-calibrated constants
-   (`MIN_BOX_H_FRAC`, silhouette thresholds, pan strips) — no augmentation can.
-2. **Parry lamp**, once those labels land: a separately-supervised blade head shown as a SECOND
-   indicator beside footwork, not collapsed into it. Re-run `exp_two_head.py` with
-   `--pool last` AND opponent context first — the existing two-head numbers predate opponent.
+1. **Train on bout 5.** ✓ labels landed 2026-08-12. `extract_continuous.py` on `5.mp4`, then
+   `train_shipping.py --ship` with all five bouts. This is the highest-value single step: it is
+   the only training data from a second venue, and cross-venue accuracy (58.1%) is now the
+   weakest honest number in the project. Keep a `--holdout 5` checkpoint so the cross-venue
+   figure stays measurable afterwards — once bout 5 is in training, 58.1% can never be
+   re-measured on it.
+2. **Parry lamp**: a separately-supervised blade head shown as a SECOND indicator beside
+   footwork, not collapsed into it. Re-run `exp_two_head.py` with `--pool last` AND opponent
+   context first — the existing two-head numbers predate opponent. Bout 5 adds 13 parries and
+   51 extensions, taking the corpus to 76 parries / 138 extensions.
 3. **Filler rejection**, which is now the blocker on the timeline being usable on full
    broadcasts rather than bout segments. Three attempts have failed: the geometric gate (36%
    precision), and duration + confidence gating, which cannot push filler below ~26% of emitted
@@ -1458,10 +1471,162 @@ Two hypotheses died here, both worth not re-testing:
 Untested idea for next time: the **scoreboard/timer overlay**, present during live play and often
 removed or restyled during replays. A fixed-region cue would be venue-specific, which is its own
 problem, but it targets the actual distinction rather than the fencers.
+**→ CHECKED ON BOUT 5 AND DEAD.** That venue's score bar is a permanent graphic, up during live
+fencing and during close-up filler alike. The arena's physical LED board shows only in the wide
+shot, but "is the wide shot up" is just shot tightness, which is already measured.
 
 Shipping a 36%-precision gate would suppress **14% of real fencing labels** to remove about half
 the phantom ones. Not worth a missing label on a real action, which is the failure a viewer
 notices.
+
+#### BOUT 5 REVERSES THE CUES — the gate is VENUE-DEPENDENT, which is why it stays unshipped
+
+Re-run unchanged on the new venue (3460 frames, 54% fencing), the script that failed on bout 4
+now looks like a success:
+
+| cue | bout 4 AUC | **bout 5 AUC** | bout 5 medians (fencing / filler) |
+|---|---|---|---|
+| n_tall | 0.71 | 0.76 | 2.00 / 1.00 |
+| h_ratio | 0.69 | **0.79** | 0.91 / 0.00 |
+| sep | 0.71 | 0.78 | 0.35 / 0.00 |
+| foot_dy | 0.65 inv | 0.72 inv | 0.01 / 1.00 |
+| box_h | 0.63 inv | 0.66 inv | 0.36 / 0.74 |
+| **motion** | **0.50 — no signal** | **0.83 INVERTED** | **7.05 / 17.03** |
+
+Best conjunction: **76% precision at 65% recall against a 54% base rate**, against bout 4's 36%
+at a 23% base.
+
+**The motion cue does not merely get stronger, it points the OPPOSITE WAY, and one mechanism
+explains both bouts.** On bout 4 the camera pans to follow the fencers, so live play carries as
+much frame-difference as a replay (22.28 vs 21.47, AUC 0.50). On bout 5 the camera is locked off
+for fencing and cuts to close-ups for filler, so filler carries **2.4× the motion of live play**.
+The cue was never measuring slow motion at all — **it measures CAMERA WORK**, a property of the
+broadcast director rather than of fencing.
+
+**So bout 5 strengthens the case against shipping a gate rather than weakening it.** A rule
+calibrated here reads 76% precision and would read 36% on bout 4; a `motion` threshold learned
+here would be inverted there and would actively suppress live fencing. Same failure mode as
+`MIN_BOX_H_FRAC` at 0.35 (tuned on bout 2, amputated bout 1) — except the correct setting
+differs in SIGN, not magnitude, so no single value exists.
+
+And even where it "works", bout 5's gate tops out at **65-69% recall**: it discards roughly a
+third of real fencing, because "exactly 2 tall people" fails whenever the detector drops a fencer
+(12% of frames) or picks up a referee. The precision reads well because the base rate is 54%, not
+because the rule is good.
+
+### BOUT 5 (2026-08-12) — the first DIFFERENT VENUE
+
+`data/labels/bout5_intervals_2track.csv`, from `data/raw_video/5.mp4`: ANANE (FRA) vs
+BIANCHI (ITA), a Genoa FIE event. **144 intervals, 619 s of labelled fencer-time, 13
+parries, 51 arm extensions**, transcribed by `scripts/transcribe_bout5.py`.
+
+**Why this bout is different in kind, not just more data.** Every constant that governs
+framing — `MIN_BOX_H_FRAC`, the silhouette brightness/bottom thresholds, the pan strips
+— was hand-calibrated on bouts 1-4, which are all 1920x1080 at 29.97 fps from similar
+broadcasts. Bout 5 is **1906x1080 at exactly 30.000 fps**, dark arena with spotlit
+piste. CLAUDE.md had this listed as untestable ("What augmentation CANNOT touch: only
+real footage from a different venue tests those"). It is now testable.
+
+| bout | intervals | fencer-time | parries | extensions |
+|---|---|---|---|---|
+| 1 | 26 | 164 s | 2 | 0 |
+| 2 | 22 | 58 s | 4 | 3 |
+| 3 | 22 | 72 s | 11 | 11 |
+| 4 | 152 | 708 s | 46 | 73 |
+| **5** | **144** | **619 s** | **13** | **51** |
+| **total** | **366** | **1621 s** | **76** | **138** |
+
+Labelled fencer-time is up 62% (1002 s → 1621 s), and bout 5 is densely labelled —
+**54% coverage per fencer** against bout 4's 23%, with the between-phrase `walk` marked
+rather than left as a gap.
+
+**`MIN_BOX_H_FRAC = 0.25` TRANSFERS — first real test, and it passes.** Sampled every
+45th frame:
+
+| | ≥2 boxes over 0.25 | two tallest, p5/p50/p95 |
+|---|---|---|
+| inside labelled fencing | **88%** | 0.24 / 0.37 / 0.43 |
+| outside (filler) | 36% | 0.23 / **0.78** / 0.98 |
+
+Fencers sit at 0.24-0.43 of frame height, the same band as bout 1 (0.20-0.50) and
+bout 2 (0.30-0.60). The constant that broke bout 1 when it was 0.35 survives a genuinely
+new broadcast at 0.25.
+
+**Label alignment verified against frames, not assumed.** At 86.75 s both fencers are
+mid-lunge exactly as labelled; at 248 s a fencer is on the piste being helped up, which
+is the `walk` reset the labels claim. No time offset.
+
+**THE SCOREBOARD GATE CUE IS DEAD.** The one untested idea left over from the failed
+"is this fencing?" gate was the score/timer overlay, on the theory that broadcasts drop
+it during replays. In bout 5 the bottom score bar is present during live fencing AND
+during the close-up filler — it is a permanent graphic, not a live-play indicator. The
+arena's physical LED board is visible only in the wide shot, but "is the wide shot up"
+is just shot tightness, which is already measured (box_h AUC 0.63 on bout 4).
+
+**CROSS-VENUE GENERALISATION: 58.1%. The first honest number of its kind.** Bout 5 was
+never in training, so the SHIPPED `action_opp.pth` is legitimately held out on it — no
+verify checkpoint needed, no circularity.
+
+| held-out bout | per-window accuracy | viewer view |
+|---|---|---|
+| bout 1 (same broadcast family) | 74.6% | 80.8% |
+| bout 4 (same broadcast family) | 67.6% | 70.4% |
+| **bout 5 (NEW VENUE)** | **58.1%** | **63.3%** |
+
+**A new venue costs 10-17 points.** That is the number to quote for "how well does this
+work on footage we have never seen", and it is the first time the project has been able
+to measure it. Every earlier held-out figure held the venue constant.
+
+Per class on bout 5 (3078 scored windows):
+
+| class | n_true | precision | recall |
+|---|---|---|---|
+| advance | 869 | 60% | **40%** |
+| retreat | 529 | 69% | 48% |
+| neutral | 683 | 68% | 51% |
+| walking | 857 | **59%** | 92% |
+| lunge | 70 | 32% | 34% |
+| parry | 70 | **12%** | **39%** |
+
+**The dominant new-venue failure is `advance` → `walking`: 282 of 869 true advances.**
+Nothing else comes close (the next is retreat→advance at 111 and retreat→parry at 104).
+These are the two classes separated ONLY by posture — CLAUDE.md, clip era: "walking and
+advance are both moving forward, only posture splits them", rescued originally by the
+crouch feature (median knee angle, fencing ~140° vs upright ~164°). A different camera
+height and piste angle shifts exactly that measurement. This is the most concrete lead
+the project has for what breaks at a new venue, and it is one feature deep.
+
+**Parry recall 39% is the highest ever recorded** (bout 4 held out: 21%; the shipped
+model historically ~1-12%), at 12% precision on 70 windows. Consistent with the standing
+position: parry is not inert, it is imprecise.
+
+**Timeline on bout 5: 55% event precision and only ONE filler event.** Dense labelling
+(54% coverage, `walk` marked rather than left as a gap) all but removes the filler
+problem that held bout 4 to 38%. But the counts now run the OTHER way — they
+UNDER-report, where bout 4 over-reported:
+
+| | advance | lunge | parry | retreat |
+|---|---|---|---|---|
+| A counted / actual | **28 / 46** | 2 / 13 | **8 / 8** | 9 / 18 |
+| B counted / actual | **18 / 59** | 7 / 5 | 4 / 5 | 9 / 15 |
+
+Bout 4 read advance 72/34; bout 5 reads 18/59. **Counts are unreliable in BOTH
+directions**, driven by whichever error dominates that footage — false positives on
+bout 4, missed advances on bout 5. Do not report a count without the true count beside
+it.
+
+**Three source anomalies, resolved and recorded rather than silently fixed:**
+
+1. **The 03:21-03:30 phrase is transcribed TWICE** with slightly different boundaries
+   (03:27.169/03:27.869 vs 03:27.083/03:27.950). Same phrase, not a repeat — the
+   exchange cannot recur inside 9 s. Keeping both would double-count it and create
+   overlapping intervals, which mis-score silently because `truth_at()` returns the
+   first match. The second copy is kept; `--keep-first-duplicate` flips it.
+2. **`04:04.067 - 04:10.183` runs backwards** — the preceding row ends at 04:06.067.
+   Read as `04:06.067` (a 4↔6 slip), the only reading that leaves no overlap. Confirmed
+   on the video: 04:08 is a between-phrase reset.
+3. **Two 0.233 s intervals** (06:22.784, 07:55.800), shorter than anything in bouts 1-4
+   (minimum 0.30 s). Transcribed as written; a 2 s window cannot recover them.
 
 ### EVENT TIMELINE + BOUT STATISTICS: works on a bout, not on a broadcast (2026-08-12)
 
