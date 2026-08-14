@@ -83,11 +83,10 @@ that cross-venue is unmeasured for the shipped model.
    held-out bouts. **A THIRD VENUE is now the highest-value labelling**: cross-venue accuracy
    is unmeasurable for the shipped model, and it is the number that most honestly describes
    the demo. Aim for parry-dense footage if there is a choice, since bout 5 diluted parry.
-2. **Parry lamp** — measured 2026-08-13 and NOT shipped. The blade head now carries real signal
-   (precision rises with threshold instead of sitting flat), but at a usable recall it is 15%
-   precision on bout 4, so 85% of lit lamps would be wrong, and the good threshold differs per
-   bout. Labels buy recall, opponent context buys precision; the next lever is a better blade
-   FEATURE, not more of the same labels.
+2. **Parry lamp** ✓ SHIPPED 2026-08-13 as a second overlay indicator, driven by the six-way
+   model's gated parry (55% precision) rather than the separately-supervised blade head, which
+   stayed at 15% and was not shipped. Parry PRECISION is solved; RECALL (17%) is not, and neither
+   more labels, a blade head, nor blade motion energy has moved it.
 3. **Filler rejection**, which is now the blocker on the timeline being usable on full
    broadcasts rather than bout segments. Three attempts have failed: the geometric gate (36%
    precision), and duration + confidence gating, which cannot push filler below ~26% of emitted
@@ -1547,6 +1546,50 @@ having already predicted one advance and one retreat — a statement about model
 about how often the truth is opposed. Generalising a conditional into a prior is the same error
 shape as the retracted "parry precision scales with blade supervision", which compared rates
 across different base rates.
+
+### SHIPPED: TWO INDICATORS IN THE OVERLAY (2026-08-13) — Aaron's idea, finally viable
+
+Aaron, weeks earlier: "what if we have two indicators, a footwork and then a parry one, so that
+when a parry comes on, both can be shown instead of one taking over the other."
+
+It was right then and not buildable: parry precision was 12-29%, so a lamp would have been
+lying most of the time it lit. The parry gate changed that (**55%** on held-out bout 4), and the
+gate had already computed the missing half — when it demotes a parry it works out the footwork
+runner-up, so showing BOTH was a rendering change rather than a modelling one.
+
+When a parry survives the gate the overlay now draws the footwork in the fencer's colour and an
+amber `parry` lamp beneath it, instead of parry replacing the footwork call.
+
+**`track.label` IS DELIBERATELY UNCHANGED.** `evaluate_labels` scores `label` against
+blade-priority truth, so moving parry out of it into a display field would have read as parry
+recall 0 — a self-inflicted regression in the metric this work exists to improve. The footwork
+goes in a separate display-only field (`track.footwork`). Verified rather than assumed: replaying
+the old and new gate over all **9304** paired windows of bout 4 gives **0 label or confidence
+differences**.
+
+**The footwork confidence is RENORMALISED over the five footwork classes** — "given this is not
+a parry, what are the legs doing". The raw runner-up almost always sits below
+`ACTION_CONF_FLOOR` once parry has taken its share, so without this the footwork line renders as
+`ready` on nearly every parry and the two-indicator display quietly collapses back into one.
+This is the two-head framing (5-way footwork + a blade lamp) without a second head.
+
+Seen working in `5_demo_2ind.mp4` at t=65.8s: **A advance 60% + parry 38%** while **B lunge
+95%** — B visibly mid-lunge, A parrying it. Truth there is A neutral+parry, B lunge+extension,
+so both indicators are correct and only A's footwork is off by one class. The lamp lit precisely
+because B's lunge probability cleared `PARRY_OPP_LUNGE_MIN`.
+
+### PORTFOLIO DEMO (2026-08-13)
+
+`scripts/demo_video.py` gained `--start` / `--end`, which SEEK rather than re-encoding a clip
+first — transcoding an 88 s cut through cv2 before annotating would throw away quality for the
+one artifact the whole project exists to produce.
+
+Rendered: bout 5, 2-90 s, five complete phrases on the spotlit Genoa piste.
+`5_demo_2ind.mp4` (129 MB raw) → `_h264.mp4` (52 MB) → `_720p.mp4` (18 MB). All gitignored.
+
+**Do NOT caption it with 76.4%.** Bout 5 is in the shipped model's training set, so the demo
+shows the model at its best rather than its generalisation, and every labelled bout is now in
+training so that is currently unavoidable. A third venue would allow a genuinely held-out demo.
 
 ### PARRY LAMP, corrected (2026-08-13): labels buy RECALL, opponent buys PRECISION
 

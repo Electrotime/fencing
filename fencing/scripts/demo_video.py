@@ -137,6 +137,10 @@ CLASS_PRIOR = {"advance": 0.184, "lunge": 0.045, "parry": 0.017,
 PARRY_NEEDS_ATTACKER = True
 PARRY_OPP_LUNGE_MIN = 0.20  # best-or-tied on both bouts; precision is flat 0.2-0.5 on
                             # bout 4 and still rising on bout 5, so this is the safe end
+# The blade lamp sits UNDER the footwork label rather than replacing it, in amber so it
+# reads as a different kind of statement from the footwork call.
+PARRY_LAMP_COLOR = (0, 165, 255)   # amber (BGR)
+PARRY_LAMP_DY = 44                 # pixels below the footwork line
 
 MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps are
                         # exactly zero, i.e. held over from the previous frame by the
@@ -169,6 +173,11 @@ class FencerTrack:
         self.label: str | None = None
         self.conf = 0.0
         self.probs: np.ndarray | None = None  # long-window distribution, for the parry gate
+        # DISPLAY ONLY, set when `label` is parry: the footwork happening underneath it.
+        # Deliberately separate from `label` -- evaluate_labels scores `label` against
+        # blade-priority truth, so moving parry out of it would read as parry recall 0.
+        self.footwork: str | None = None
+        self.footwork_conf = 0.0
         self.counts: dict[str, int] = {}  # how often each label got emitted
 
 
@@ -402,11 +411,26 @@ def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
     Runs after BOTH tracks have predicted, so each fencer sees the other's
     distribution for the same frame.
     """
-    if not PARRY_NEEDS_ATTACKER:
-        return
-    lunge_i = CLASS_NAMES.index("lunge")
+    lunge_i, parry_i = CLASS_NAMES.index("lunge"), CLASS_NAMES.index("parry")
     for slot, track in tracks.items():
+        track.footwork, track.footwork_conf = None, 0.0
         if track.label != "parry" or track.probs is None:
+            continue
+
+        # The footwork underneath the parry, for the second indicator. Renormalised
+        # over the five footwork classes -- "GIVEN this is not a parry, what are the
+        # legs doing" -- because the raw runner-up sits below ACTION_CONF_FLOOR
+        # almost always once parry has taken its share, and would render as `ready`
+        # on nearly every parry. This is the two-head framing (5-way footwork + a
+        # blade lamp) without a second head.
+        alt = track.probs.copy()
+        alt[parry_i] = -1.0
+        fw_i = int(alt.argmax())
+        rest = 1.0 - float(track.probs[parry_i])
+        track.footwork = CLASS_NAMES[fw_i]
+        track.footwork_conf = float(track.probs[fw_i] / rest) if rest > 1e-6 else 0.0
+
+        if not PARRY_NEEDS_ATTACKER:
             continue
         opp = tracks.get("B" if slot == "A" else "A")
         # No opponent tracked at all -> no evidence of an attack -> no parry. That is
@@ -415,11 +439,9 @@ def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
         opp_attack = 0.0 if opp is None or opp.probs is None else float(opp.probs[lunge_i])
         if opp_attack >= PARRY_OPP_LUNGE_MIN:
             continue
-        # demote to the runner-up of this fencer's own long window
-        alt = track.probs.copy()
-        alt[CLASS_NAMES.index("parry")] = -1.0
-        idx = int(alt.argmax())
-        track.label, track.conf = CLASS_NAMES[idx], float(alt[idx])
+        # gate rejected it: demote to the runner-up, and there is no lamp to light
+        track.label, track.conf = CLASS_NAMES[fw_i], float(alt[fw_i])
+        track.footwork, track.footwork_conf = None, 0.0
 
 
 def _self_test_parry_gate() -> None:
@@ -465,7 +487,36 @@ def _self_test_parry_gate() -> None:
           "B": mk("neutral", probs(neutral=0.5, lunge=PARRY_OPP_LUNGE_MIN))}
     _apply_parry_gate(tr)
     assert tr["A"].label == "parry"
-    print("self-test ok: parry gate fires only on parry, only without an attacker")
+    # ---- two-indicator display fields ----
+    # A surviving parry must keep label == "parry" (evaluate_labels scores that against
+    # blade-priority truth) AND expose the footwork underneath it for the second lamp.
+    tr = {"A": mk("parry", probs(parry=0.5, retreat=0.3, walking=0.1)),
+          "B": mk("lunge", probs(lunge=0.8))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "parry", "scoring label must not change"
+    assert tr["A"].footwork == "retreat", tr["A"].footwork
+    # renormalised over the non-parry mass: 0.3 / (1 - 0.5) = 0.6, NOT the raw 0.3.
+    # Without this the footwork line sits under ACTION_CONF_FLOOR on nearly every
+    # parry and the two-indicator display collapses back to one indicator.
+    assert abs(tr["A"].footwork_conf - 0.6) < 1e-4, tr["A"].footwork_conf
+
+    # a REJECTED parry lights no lamp and leaves no footwork field behind
+    tr = {"A": mk("parry", probs(parry=0.5, retreat=0.3)),
+          "B": mk("neutral", probs(neutral=0.9, lunge=0.0))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "retreat" and tr["A"].footwork is None, vars(tr["A"])
+
+    # a non-parry call never gets a lamp, and stale fields are cleared between frames
+    tr = {"A": mk("parry", probs(parry=0.5, retreat=0.3)),
+          "B": mk("lunge", probs(lunge=0.8))}
+    _apply_parry_gate(tr)
+    assert tr["A"].footwork == "retreat"
+    tr["A"].label, tr["A"].probs = "advance", probs(advance=0.9)
+    _apply_parry_gate(tr)
+    assert tr["A"].footwork is None, "stale footwork survived into a non-parry frame"
+
+    print("self-test ok: parry gate fires only on parry, only without an attacker; "
+          "two-indicator fields set without touching the scoring label")
 
 
 def _self_test_assign() -> None:
@@ -515,11 +566,25 @@ def main() -> None:
         _self_test_assign()
         _self_test_parry_gate()
         return
-    argv = [a for a in sys.argv[1:] if a != "--frame-model"]
+    # --start/--end cut a segment WITHOUT re-encoding it first. The portfolio demo is
+    # 60-90 s out of a 10-26 min source, and transcoding a clip through cv2 before
+    # annotating it would throw away quality for no reason.
+    def _opt(name, default=None):
+        for i, a in enumerate(sys.argv):
+            if a == name and i + 1 < len(sys.argv):
+                return float(sys.argv[i + 1])
+            if a.startswith(f"{name}="):
+                return float(a.split("=", 1)[1])
+        return default
+
+    start_s, end_s = _opt("--start"), _opt("--end")
+    _skip = {str(v) for v in (start_s, end_s) if v is not None}
+    argv = [a for a in sys.argv[1:]
+            if a != "--frame-model" and not a.startswith("--") and a not in _skip]
     use_frame = "--frame-model" in sys.argv
     if not argv:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
-                 "[--frame-model | --self-test]")
+                 "[--start S] [--end S] [--frame-model | --self-test]")
     video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")
@@ -555,6 +620,18 @@ def main() -> None:
         fps = 30.0
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # Seek AFTER reading the properties. The tracks start empty either way, so the
+    # first MIN_REAL_FRAMES frames of the segment are unlabelled while the window
+    # fills -- start a little before the action you want to show.
+    first = int(round((start_s or 0.0) * fps))
+    last = int(round(end_s * fps)) if end_s is not None else total
+    last = min(last, total)
+    if first:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, first)
+    n_frames = max(0, last - first)
+    if start_s is not None or end_s is not None:
+        print(f"segment {first / fps:.1f}s -> {last / fps:.1f}s "
+              f"({n_frames} frames, {n_frames / fps:.1f}s)")
     writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (W, H))
 
     tracks = {"A": FencerTrack(), "B": FencerTrack()}
@@ -566,7 +643,7 @@ def main() -> None:
             slot: stack.enter_context(_make_landmarker(mp.tasks.vision.RunningMode.VIDEO))
             for slot in tracks
         }
-        for idx in tqdm(range(total), desc=video.stem[:40], unit="frame"):
+        for idx in tqdm(range(n_frames), desc=video.stem[:40], unit="frame"):
             ok, frame = cap.read()
             if not ok:
                 break
@@ -632,6 +709,27 @@ def main() -> None:
                     pts = np.stack([kp[:, 0] * W, kp[:, 1] * H], axis=1)
                     draw_skeleton(frame, pts)
                 org = (10, 40) if slot == "A" else (W - 360, 40)
+                # TWO INDICATORS. Aaron: "what if we have two indicators, a footwork
+                # and then a parry one, so that when a parry comes on, both can be
+                # shown instead of one taking over the other." Footwork and blade are
+                # near-orthogonal tracks -- a fencer parries WHILE retreating, and 86%
+                # of labelled parries have the opponent attacking -- so a single label
+                # has to throw one of them away. Only drawn when the parry survived the
+                # gate, which is what makes the lamp worth believing (55% precision on
+                # held-out bout 4, up from 29%).
+                if track.label == "parry" and track.footwork is not None:
+                    quiet = (track.footwork in QUIET_CLASSES
+                             or track.footwork_conf < ACTION_CONF_FLOOR)
+                    if quiet:
+                        draw_action_label(frame, f"{slot}: ready", None,
+                                          org=org, color=(150, 150, 150))
+                    else:
+                        draw_action_label(frame, f"{slot}: {track.footwork}",
+                                          track.footwork_conf, org=org, color=color)
+                    draw_action_label(frame, "parry", track.conf,
+                                      org=(org[0], org[1] + PARRY_LAMP_DY),
+                                      color=PARRY_LAMP_COLOR)
+                    continue
                 is_action = (track.label is not None
                              and track.label not in QUIET_CLASSES
                              and track.conf >= ACTION_CONF_FLOOR)
