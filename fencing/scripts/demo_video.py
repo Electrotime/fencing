@@ -137,6 +137,39 @@ CLASS_PRIOR = {"advance": 0.184, "lunge": 0.045, "parry": 0.017,
 PARRY_NEEDS_ATTACKER = True
 PARRY_OPP_LUNGE_MIN = 0.20  # best-or-tied on both bouts; precision is flat 0.2-0.5 on
                             # bout 4 and still rising on bout 5, so this is the safe end
+
+# The SAME co-occurrence run the other way. The veto above can only delete, so parry
+# recall was capped at "how often parry wins the argmax" -- 15% on held-out bout 4.
+# When parry LOST the argmax but the opponent is unmistakably lunging, promote it.
+#
+#   held-out bout 4   overall 72.2% -> 72.7%,  parry P 52% -> 58%,  R 15% -> 29%
+#   held-out bout 5   overall 59.7% -> 59.7%,  parry P 27% -> 29%,  R 20% -> 24%
+#
+# Precision goes UP while recall doubles because the promoted windows are BETTER than
+# the average existing parry call: 29 of 45 (64%) are true parries on bout 4.
+#
+# WHY IT WORKS, mechanically: 37 of those 45 were being called `retreat`. Parry-while-
+# retreating is the ordinary case, the legs dominate the pose signal, and under the
+# blade-priority collapse the truth is `parry` -- so the model was losing these to its
+# own footwork call. The opponent's lunge is what breaks the tie. This is the same
+# effect evaluate_labels.py documented from the other side ("22 retreat windows were
+# called parry, and they cluster on real parries").
+#
+# CONTROLLED, because "promote when own parry >= P" is just a lower threshold and any
+# lower threshold buys recall. Matched on the NUMBER of promotions, ranked by own parry
+# probability with the opponent ignored: bout 4 gives 37% precision / 0.25 F1 against
+# the opponent-conditioned 58% / 0.39. The opponent is doing the work, not the bar.
+#
+# HONEST WEAKNESS: bout 4 carries this. Bout 5 promoted 6 windows and bout 1 promoted 5
+# -- too few to confirm or refute, and bout 1's five were 1/5 correct. Re-run
+# scripts/sweep_parry_promote.py when the third venue lands. Its grid shows a broad
+# plateau on bout 4 where LOWER thresholds do better still (0.10/0.30 -> 43% recall),
+# deliberately not taken: bout 4 is the only bout that measures the effect, so tuning
+# on it would be tuning on the confirmation set.
+PARRY_PROMOTE = True
+PARRY_PROMOTE_MIN = 0.15      # own parry probability, chosen on bout 5, confirmed on 4
+PARRY_PROMOTE_OPP_MIN = 0.60  # opponent lunge -- far above the veto's 0.20, because
+                              # admitting weaker own-evidence demands stronger context
 # The blade lamp sits UNDER the footwork label rather than replacing it, in amber so it
 # reads as a different kind of statement from the footwork call.
 PARRY_LAMP_COLOR = (0, 165, 255)   # amber (BGR)
@@ -379,7 +412,17 @@ def _predict(model: ActionLSTM, track: FencerTrack,
 
 
 def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
-    """Drop a `parry` call unless the OPPONENT looks like they are attacking.
+    """Couple the two fencers' parry decisions to the OPPONENT's attack, both ways.
+
+    Two rules over the same cue, see the constants above for the numbers:
+      VETO     called parry, opponent not attacking      -> demote to the footwork
+      PROMOTE  parry lost the argmax, opponent lunging   -> call parry after all
+
+    They cannot fight each other. The veto fires below opponent-lunge 0.20 and the
+    promoter demands 0.60, and promotion eligibility is `argmax != parry` rather than
+    `label != parry`, so a window the veto just demoted is never handed back.
+    (`track.counts` is incremented in _predict, i.e. BEFORE either rule runs, so the
+    end-of-run label mix reports raw model calls -- that was already true of the veto.)
 
     Aaron's observation, and the labels back it hard. Across bouts 3-5, of 67
     labelled parries the opponent is simultaneously:
@@ -414,8 +457,13 @@ def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
     lunge_i, parry_i = CLASS_NAMES.index("lunge"), CLASS_NAMES.index("parry")
     for slot, track in tracks.items():
         track.footwork, track.footwork_conf = None, 0.0
-        if track.label != "parry" or track.probs is None:
+        if track.probs is None:
             continue
+        opp = tracks.get("B" if slot == "A" else "A")
+        # No opponent tracked at all -> no evidence of an attack. That is the
+        # conservative reading in BOTH directions: it deletes a parry with nobody
+        # visible to parry, and it never promotes one.
+        opp_attack = 0.0 if opp is None or opp.probs is None else float(opp.probs[lunge_i])
 
         # The footwork underneath the parry, for the second indicator. Renormalised
         # over the five footwork classes -- "GIVEN this is not a parry, what are the
@@ -427,21 +475,31 @@ def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
         alt[parry_i] = -1.0
         fw_i = int(alt.argmax())
         rest = 1.0 - float(track.probs[parry_i])
-        track.footwork = CLASS_NAMES[fw_i]
-        track.footwork_conf = float(track.probs[fw_i] / rest) if rest > 1e-6 else 0.0
+        fw_name = CLASS_NAMES[fw_i]
+        fw_conf = float(track.probs[fw_i] / rest) if rest > 1e-6 else 0.0
 
-        if not PARRY_NEEDS_ATTACKER:
+        if track.label == "parry":
+            track.footwork, track.footwork_conf = fw_name, fw_conf
+            if not PARRY_NEEDS_ATTACKER:
+                continue
+            if opp_attack >= PARRY_OPP_LUNGE_MIN:
+                continue
+            # gate rejected it: demote to the runner-up, and no lamp to light
+            track.label, track.conf = fw_name, float(alt[fw_i])
+            track.footwork, track.footwork_conf = None, 0.0
             continue
-        opp = tracks.get("B" if slot == "A" else "A")
-        # No opponent tracked at all -> no evidence of an attack -> no parry. That is
-        # the conservative reading, and a parry with nobody visible to parry is
-        # exactly the false positive this exists to remove.
-        opp_attack = 0.0 if opp is None or opp.probs is None else float(opp.probs[lunge_i])
-        if opp_attack >= PARRY_OPP_LUNGE_MIN:
+
+        # ---- the other direction: PROMOTE a parry that lost the argmax ----------
+        if not PARRY_PROMOTE or int(track.probs.argmax()) == parry_i:
             continue
-        # gate rejected it: demote to the runner-up, and there is no lamp to light
-        track.label, track.conf = CLASS_NAMES[fw_i], float(alt[fw_i])
-        track.footwork, track.footwork_conf = None, 0.0
+        if (float(track.probs[parry_i]) >= PARRY_PROMOTE_MIN
+                and opp_attack >= PARRY_PROMOTE_OPP_MIN):
+            track.footwork, track.footwork_conf = fw_name, fw_conf
+            # Displayed confidence is the RAW parry probability, which understates the
+            # call: promotions are 64% correct on bout 4 while reading 0.15-0.4. The
+            # honest options were an uncalibrated combined score or the raw number,
+            # and this project does not invent calibrations it has not measured.
+            track.label, track.conf = "parry", float(track.probs[parry_i])
 
 
 def _self_test_parry_gate() -> None:
@@ -505,6 +563,45 @@ def _self_test_parry_gate() -> None:
           "B": mk("neutral", probs(neutral=0.9, lunge=0.0))}
     _apply_parry_gate(tr)
     assert tr["A"].label == "retreat" and tr["A"].footwork is None, vars(tr["A"])
+
+    # ---- the promoter: the same cue run the other way ----
+    # parry lost the argmax to retreat, but the opponent is clearly lunging -> promoted,
+    # and the losing footwork becomes the second indicator
+    tr = {"A": mk("retreat", probs(retreat=0.5, parry=0.25)),
+          "B": mk("lunge", probs(lunge=0.8))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "parry", tr["A"].label
+    assert tr["A"].footwork == "retreat", tr["A"].footwork
+    assert abs(tr["A"].conf - 0.25) < 1e-5, tr["A"].conf
+
+    # same window, quiet opponent -> untouched. This is the pair that separates the
+    # promoter from "just a lower parry threshold"; the matched control that does the
+    # same thing without the opponent scores 37% precision against 58%.
+    tr = {"A": mk("retreat", probs(retreat=0.5, parry=0.25)),
+          "B": mk("neutral", probs(neutral=0.9, lunge=0.02))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "retreat" and tr["A"].footwork is None, vars(tr["A"])
+
+    # own parry probability below PARRY_PROMOTE_MIN -> not promoted however hard the
+    # opponent attacks. Context alone must never manufacture a parry.
+    tr = {"A": mk("retreat", probs(retreat=0.7, parry=0.10)),
+          "B": mk("lunge", probs(lunge=0.95))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "retreat", tr["A"].label
+
+    # THE INTERACTION THAT MUST NOT HAPPEN: a parry the veto demoted must stay demoted.
+    # Here the opponent is quiet (0.0), so the veto fires; the promoter is checked on
+    # argmax, not on the post-veto label, so it cannot hand the parry back. If this
+    # ever flips, the veto's 29% -> 55% precision silently reverts.
+    tr = {"A": mk("parry", probs(parry=0.6, retreat=0.3)),
+          "B": mk("neutral", probs(neutral=0.9, lunge=0.0))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "retreat", tr["A"].label
+
+    # no opponent distribution -> conservative in BOTH directions: never promotes
+    tr = {"A": mk("retreat", probs(retreat=0.5, parry=0.25)), "B": FencerTrack()}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == "retreat", tr["A"].label
 
     # a non-parry call never gets a lamp, and stale fields are cleared between frames
     tr = {"A": mk("parry", probs(parry=0.5, retreat=0.3)),
@@ -714,9 +811,15 @@ def main() -> None:
                 # shown instead of one taking over the other." Footwork and blade are
                 # near-orthogonal tracks -- a fencer parries WHILE retreating, and 86%
                 # of labelled parries have the opponent attacking -- so a single label
-                # has to throw one of them away. Only drawn when the parry survived the
-                # gate, which is what makes the lamp worth believing (55% precision on
-                # held-out bout 4, up from 29%).
+                # has to throw one of them away. Only drawn when the gate agrees, which
+                # is what makes the lamp worth believing: 29% precision ungated, 55%
+                # with the veto, 58% now that the promoter also runs.
+                #
+                # The promoter is why this display earns its keep rather than merely
+                # decorating. Its 45 promotions on bout 4 are overwhelmingly windows the
+                # model called `retreat` and the labels call `parry` -- exactly the
+                # both-at-once case a single label cannot show. Before the promoter the
+                # lamp lit 61 times on bout 4; now it lights 106.
                 if track.label == "parry" and track.footwork is not None:
                     quiet = (track.footwork in QUIET_CLASSES
                              or track.footwork_conf < ACTION_CONF_FLOOR)

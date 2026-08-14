@@ -22,7 +22,10 @@ each other** — a checkpoint's pooling mode and feature width are part of its i
 | `USE_OPPONENT` | `True` | 13 agg features; a wrong `n_agg` RAISES |
 | `APPLY_CLASS_PRIOR` | `False` | retired 2026-08-09, no longer needed |
 | `PARRY_NEEDS_ATTACKER` | `True` | no parry unless the opponent is attacking (86% of real parries) |
-| `PARRY_OPP_LUNGE_MIN` | `0.20` | parry precision 29% → **55%** on held-out bout 4 |
+| `PARRY_OPP_LUNGE_MIN` | `0.20` | veto. parry precision 29% → **55%** on held-out bout 4 |
+| `PARRY_PROMOTE` | `True` | the same cue run the other way; recall 15% → **29%**, precision → 58% |
+| `PARRY_PROMOTE_MIN` | `0.15` | own parry probability floor; chosen on bout 5, confirmed on 4 |
+| `PARRY_PROMOTE_OPP_MIN` | `0.60` | opponent lunge — far above the veto's 0.20, on purpose |
 
 ### Where accuracy stands
 
@@ -50,9 +53,13 @@ that cross-venue is unmeasured for the shipped model.
 
 ### What is open
 
-1. **`parry` — precision is SOLVED (55%), recall is not (17%).** The parry gate fixed the false
-   positives; what remains is that the model still misses ~5 of 6 real parries. Recall is now the
-   whole problem, and the indicated route is a better blade FEATURE (blade motion energy, whose
+1. **`parry` — precision 58%, recall 29% on held-out bout 4** (was 29% / 19% ungated). Both the
+   veto and the promoter have now run; see
+   [the promoter](#shipped-the-parry-promoter--the-same-cue-run-backwards-recall-15--29-2026-08-13).
+   Still missing ~2 of 3 real parries, and **the promoter's evidence rests almost entirely on
+   bout 4** — bouts 5 and 1 promoted 6 and 5 windows respectively, too few to confirm or refute.
+   Re-run `scripts/sweep_parry_promote.py` when the third venue lands. The indicated route for the
+   remaining recall is a better blade FEATURE (blade motion energy, whose
    two known measurement flaws are untested — see its entry). More labels also buy recall, per the
    ablation below. Older framing, still relevant for the two-head option: See
    [two heads](#two-heads-aarons-two-indicator-framing-2026-08-09): parry precision scales with
@@ -279,7 +286,7 @@ Harmless to leave.
 | **demo** | `demo_video.py` — the shipped inference loop; `--self-test` checks slot assignment |
 | **data pipeline** | `process_clips.py`, `extract_continuous.py`, `extract_blade_frames.py` |
 | **training** | `train_shipping.py` (the one that ships: `--ship`, `--holdout N`, `--pool`, `--opponent`), `train_continuous.py` (leave-one-bout-out), `learning_curve.py` |
-| **evaluation** | `evaluate_labels.py` (`--model`, `--pool`, `--no-prior`, `--tag`, `--frame-model`), `estimate_class_prior.py` |
+| **evaluation** | `evaluate_labels.py` (`--model`, `--pool`, `--no-prior`, `--tag`, `--frame-model`), `estimate_class_prior.py`, `sweep_parry_promote.py` (offline decision-rule sweep over cached probabilities, with the matched own-only control; `--tune`, `--confirm`, `--self-test`) |
 | **reporting** | `bout_timeline.py` — event timeline + per-fencer statistics from a probability cache; `--sweep`, `--csv`, `--self-test` |
 | **label tooling** | `check_labels.py` (validates BOTH schemas, catches overlaps), `upgrade_labels.py`, `draft_labels.py`, `transcribe_bout4.py` |
 | **closed experiments** | `exp_pooling.py`, `exp_two_head.py`, `exp_opponent.py`, `exp_window.py`, `exp_mirror.py`, `calibrate_gate.py`, `blade_energy.py`, `analyze_blade_energy.py`, `inspect_detections.py` |
@@ -1546,6 +1553,78 @@ having already predicted one advance and one retreat — a statement about model
 about how often the truth is opposed. Generalising a conditional into a prior is the same error
 shape as the retracted "parry precision scales with blade supervision", which compared rates
 across different base rates.
+
+### SHIPPED: THE PARRY PROMOTER — the same cue run backwards. Recall 15% → 29% (2026-08-13)
+
+The parry gate was **one-directional**: it could only ever delete. So parry recall was structurally
+capped at "how often parry wins the argmax" — and the veto pushed it *down*, 19% → 17%, because
+deleting is all it can do. Aaron's co-occurrence observation is symmetric and only half of it was
+being used.
+
+    VETO      argmax == parry, opponent lunge < 0.20                -> demote   (shipped 08-13)
+    PROMOTE   argmax != parry, own parry >= 0.15, opp lunge >= 0.60 -> promote  (this entry)
+
+| held-out bout | overall | parry precision | parry recall |
+|---|---|---|---|
+| **bout 4** (`verify_h4_b5`, trained 1,2,3,5) | 72.2% → **72.7%** | 52% → **58%** | 15% → **29%** |
+| bout 5 (`action_opp`, trained 1-4) | 59.7% → 59.7% | 27% → 29% | 20% → 24% |
+
+**Precision goes UP while recall doubles**, which sounds impossible and is not: the promoted
+windows are simply *better than the average existing parry call*. 29 of 45 promotions on bout 4
+(64%) are true parries, against the 52% the gate was already achieving.
+
+#### Why it works, mechanically
+
+**37 of those 45 promoted windows were being called `retreat`.** Parry-while-retreating is the
+ordinary case — the legs dominate the pose signal, and under the blade-priority collapse the truth
+is `parry`, so the model was losing these to its own footwork call. The opponent's lunge breaks the
+tie. This is the same effect `evaluate_labels.py` documented from the other side ("22 retreat
+windows were called parry, and they cluster on real parries: median 2.35 s away, 68% within 3 s").
+
+It is also what makes the two-indicator overlay earn its keep rather than merely decorate: these
+are precisely the both-at-once windows a single label cannot express. The lamp lit 61 times on
+bout 4 before the promoter, 106 after.
+
+#### The control, which is what makes this believable
+
+"Promote when own parry >= P" is *just a lower decision threshold*, and any lower threshold buys
+recall. So the promoter is scored against an own-only control **matched on the NUMBER of
+promotions**: same count of windows, ranked by own parry probability, opponent ignored entirely.
+Same recall budget spent, same class, one variable different.
+
+| bout 4, 45 promotions | overall | parry precision | parry recall | F1 |
+|---|---|---|---|---|
+| opponent-conditioned | **+0.55 pts** | **58%** | **29%** | **0.39** |
+| own-only, matched n | −0.68 pts | 37% | 19% | 0.25 |
+
+The opponent is doing the work, not the lowered bar. Same logic that closed blade energy as a
+negative via its shuffled control — the control is what separates information from budget.
+
+#### Protocol, and where it is weak
+
+Pre-registered in `scripts/sweep_parry_promote.py`'s docstring before the sweep ran: tune on
+bout 5, confirm on bout 4, criterion parry F1, **veto if overall accuracy falls**. Held-out caches
+only (`4_probs_gate.npz` is `action_opp5` on bout 4 and is circular — it exists only for the gate's
+label-invariance check).
+
+Two honest weaknesses, both stated rather than smoothed over:
+
+1. **Bout 4 carries this result.** Bout 5 promoted 6 windows and bout 1 promoted 5 — bout 1's were
+   1/5 correct. Neither sample can confirm or refute anything. The effect is real on the one bout
+   with enough parries to measure it (207) and unmeasured elsewhere.
+2. **The tuning bout barely constrained the threshold.** Bout 5's whole grid spans F1 0.22-0.27 on
+   6-window differences — noise. So 0.15/0.60 was effectively an arbitrary pick from a tie, which
+   happened to confirm strongly. What rescues it from being a tuned constant is that bout 4 shows a
+   **broad plateau, not a spike**: 41 of 42 grid settings improve overall accuracy there.
+
+That plateau also shows *lower* thresholds doing better still (0.10/0.30 → 43% recall, +0.63 pts).
+**Deliberately not taken.** Bout 4 is the only bout that measures the effect, so tuning on it would
+be tuning on the confirmation set — the exact mistake the pre-registration exists to prevent. Re-run
+the sweep when the third venue lands.
+
+*Verification:* the shipped `_apply_parry_gate` was replayed against the sweep's `decide()` over all
+**6,897 scorable windows of bouts 4 and 5 — 0 disagreements**. Offline measurement and live code
+silently diverging is the standing risk of this whole method, so it gets checked, not assumed.
 
 ### SHIPPED: TWO INDICATORS IN THE OVERLAY (2026-08-13) — Aaron's idea, finally viable
 
