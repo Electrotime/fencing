@@ -88,15 +88,11 @@ that cross-venue is unmeasured for the shipped model.
    precision on bout 4, so 85% of lit lamps would be wrong, and the good threshold differs per
    bout. Labels buy recall, opponent context buys precision; the next lever is a better blade
    FEATURE, not more of the same labels.
-3. **Wire `blade/torso` in as a 7th engineered feature** and score held-out accuracy — the
-   indicated route to parry RECALL (17%), now that the gate has fixed precision. Best
-   single-feature parry AUC on record (0.79 over 70 parries), but `stance_ratio` had 0.91 and
-   hurt the model, so this is a measurement to run, not a result. Needs re-extraction.
-4. **Filler rejection**, which is now the blocker on the timeline being usable on full
+3. **Filler rejection**, which is now the blocker on the timeline being usable on full
    broadcasts rather than bout segments. Three attempts have failed: the geometric gate (36%
    precision), and duration + confidence gating, which cannot push filler below ~26% of emitted
    events. The one untested idea is the scoreboard/timer overlay region.
-5. **Phase 5** (touch predictor) — the only unbuilt phase with a real design behind it.
+4. **Phase 5** (touch predictor) — the only unbuilt phase with a real design behind it.
 
 ### Standing workflow rule
 
@@ -170,6 +166,14 @@ column sitting in the same table.
 - **Validation is LEAVE-ONE-BOUT-OUT, never a random split.** Windows are emitted every 5 frames
   from a 60-frame span, so neighbours share 92% of their frames and a random split reports a
   fantasy.
+- **Every new feature needs a SHUFFLED-FEATURE CONTROL.** A new input also widens the head, so
+  part of any gain is capacity rather than information. Permute the column within each bout and
+  re-run: identical distribution, identical parameter count, no alignment. Blade energy read
+  "+1.6 pts mean, positive on both held-out bouts" and the control reproduced the whole effect
+  on one of them. One extra run; it is the difference between a feature and a null.
+- **An AUC is only valid for the UNIT it was measured on.** Blade/torso scores 0.79 on hand-cut
+  intervals and 0.53 on the 2 s windows the model actually consumes. Same data, same feature,
+  different question. Check the unit before quoting a separability number.
 - **Single-feature AUC shows a signal EXISTS, not that the model LACKS it.** `stance_ratio` had
   the best AUC of any feature ever tried here (0.91) and still made the model worse. Never add a
   feature on AUC alone.
@@ -957,11 +961,58 @@ and reads zero motion everywhere — a clean, convincing null result for entirel
 *Also settled: the p99 retraction was CORRECT.* Pooled p99 is 0.66 against the mean's 0.79, so
 the mean was always better and bout 2's p99 = 0.70 was noise, exactly as recorded.
 
-**NEXT STEP IS NOT MORE MEASUREMENT.** Wire `blade/torso` in as a 7th engineered feature and
-score held-out accuracy. Remember `stance_ratio`: the best AUC ever tried here (0.91) and it
-still made the model WORSE. AUC says a signal exists, never that the model lacks it. This needs
-re-extraction because `agg` is cached — and parry RECALL (17%) is the metric it should move,
-since the parry gate already fixed precision.
+#### AS A 7th FEATURE: NULL. A shuffled control caught what two positive holdouts hid
+
+`scripts/exp_blade_feature.py`. Joins the two caches on `(slot, time)` — the same trick
+`exp_opponent.py` used before opponent context was built — so no re-extraction was needed to
+test it. Layout `[own(7) | opponent(7) | present(1)] = 15` against the shipped 13.
+
+**First, the AUC does not survive the change of unit.** 0.79 was measured on hand-cut
+INTERVALS; the model consumes fixed 2 s WINDOWS:
+
+| blade/torso p90, parry vs non-blade | bout 3 | bout 4 | bout 5 | pooled |
+|---|---|---|---|---|
+| span 2.00 s (the model's window) | 0.34 | 0.49 | 0.43 | **0.53** |
+| span 0.35 s | 0.51 | 0.65 | 0.57 | **0.66** |
+
+Chance at the window level. The cause is DILUTION — a parry is ~0.6 s, so p90 over 2 s mostly
+reports whatever else was in the window — and shortening the span recovers it monotonically, the
+same reasoning that made `last` pooling beat `mean`. `BLADE_SPAN = 0.35 s`.
+*(Note the pooled 0.53 exceeds all three bouts individually: Simpson's paradox from pooling
+distributions with different per-bout scales. The interval-level 0.79 is pooled the same way.)*
+
+**Then the training result, 4 seeds, and the control that kills it:**
+
+| held out | baseline | + blade | **+ SHUFFLED blade** | real − shuffled |
+|---|---|---|---|---|
+| bout 4 | 67.9% | 69.1% (+1.20) | 67.7% (−0.16) | **+1.36** |
+| bout 1 | 73.3% | 75.3% (+2.04) | **75.5% (+2.24)** | **−0.20** |
+
+`--shuffle` permutes the blade column within each bout: identical marginal distribution,
+identical parameter count, zero alignment to the window it describes. On bout 1 it performs **as
+well as the real feature**, and its parry-recall delta is IDENTICAL (+3.1 both). So bout 1's
+entire gain was the head's first Linear getting two inputs wider — capacity, not information.
+
+**Verdict: NULL, do not ship.** Mean real-minus-control is +0.58 pts against seed sd of
+0.7-2.1, positive on one holdout and negative on the other.
+
+**And parry recall — the thing this was for — went the WRONG way on the bout that has the
+data:** 18% → 16% on bout 4 (207 parry windows), against 16% → 19% on bout 1 (8 windows). The
+apparent gains landed on `neutral` (+10.2) and `advance` (+11.2), i.e. the classes it was not
+built for, which is usually the tell that a feature is not doing what its story says.
+
+**METHOD, worth adopting generally: add a SHUFFLED-FEATURE CONTROL to every new feature test.**
+Without it this reads "+1.6 pts mean, positive on both held-out bouts" and ships. Any new input
+also widens the head, so some of every gain is capacity. The control costs one extra run and is
+the only thing separating the two.
+
+*Also fixed while running this: the delta line printed "+0.0 pts" for a real +1.6, because a
+fraction was formatted with `:+.1f` instead of scaled to points. Exactly the kind of slip that
+lets a null through as a win.*
+
+**Where that leaves parry:** precision is solved (55%, via the gate), recall is not (17%) and
+neither more labels, a separately-supervised blade head, nor blade motion energy has moved it.
+The remaining ideas all need a better blade OBSERVABLE rather than a better use of this one.
 
 ---
 
@@ -2058,9 +2109,13 @@ between phrases looks like. The video is fine.
 ### Blade
 
 - Blade DETECTION as an action-model input — 1-2% frame coverage, killed by motion blur
-- ~~Blade motion ENERGY (pooled parry AUC 0.55-0.59, chance)~~ **⚠ NOT a dead end — REOPENED
-  2026-08-13. At n=70 parries the mean blade/torso ratio scores 0.79.** The v1 null came from
-  6 parries. The ORIENTED-STRIP rewrite is the dead end (0.66); the crude axis-aligned box wins.
+- **Blade motion energy AS A MODEL FEATURE — dead, and properly killed this time.** The signal
+  is real at INTERVAL level (0.79 over 70 parries; the original n=6 null was underpowered) but
+  chance at WINDOW level (0.53), and as a 7th feature a shuffled control reproduces the entire
+  gain on one of two holdouts. Parry recall went the wrong way on the bout with the data.
+- The ORIENTED-STRIP rewrite of blade energy (v2): 0.66 vs the crude axis-aligned box's 0.79.
+  Both named flaws were genuinely fixed and it still lost; the fat box's tolerance of
+  wrist-keypoint error is the untested explanation.
 
 ---
 
