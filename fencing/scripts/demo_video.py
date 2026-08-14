@@ -396,12 +396,35 @@ def _predict(model: ActionLSTM, track: FencerTrack,
     # MORE confident long window (a 0.65 parry should not beat a 0.95 lunge). A real
     # parry still wins easily, since a 2 s window mostly filled by the parry is
     # exactly where the long call is weak.
-    # Honest sizing (bout 1, measured by actually disabling the path): the override
-    # contributes 16 of fencer A's 68 parry calls and 5 of B's 22 — about a quarter.
-    # This guard removes only ~4. So parry over-prediction is NOT mainly this logic;
-    # it comes from the LONG window, i.e. the model. Fixing it means fixing parry
-    # (one feature, wrist-speed p90 — see the parry notes in CLAUDE.md), not tuning
-    # here. Kept because the pathology it blocks is real, not because it moved much.
+    # Honest sizing, ORIGINAL (bout 1, clips-only checkpoint, measured by disabling the
+    # path): 16 of fencer A's 68 parry calls and 5 of B's 22 — about a quarter.
+    #
+    # RE-MEASURED 2026-08-13 against `action_opp5`, because this was about to be deleted
+    # as dead code. It is NOT dead, and the reasoning that said it was is worth keeping
+    # as a warning: parry probability in the cached LONG-window vectors tops out at
+    # 0.106, far under FAST_CONF, so the path looked unreachable. Wrong cache. The
+    # override reads the SHORT window, where parry reaches 0.94 — a 0.6 s parry fills
+    # most of a 0.8 s window and is diluted to nothing in a 2 s one. Same dilution that
+    # sets BLADE_SPAN to 0.35 s and makes `last` pooling beat `mean`.
+    #
+    #   bout 1           0 fires / 1242 windows   (the bout the ORIGINAL sizing used)
+    #   bout 5 300-400   2 fires / 1194 windows   both in unlabelled time
+    #   bout 4  60-200   6 fires / 1674 windows   4 in labelled time, ALL FOUR true
+    #                                             parries, every one retreat+parry
+    #
+    # So the path did not die, it MOVED: the checkpoint changed underneath it and bout 1
+    # stopped exercising it. Checking one bout would have been misleading either way.
+    #
+    # NOT redundant with the parry promoter, which was the other reason to delete it. Of
+    # those four true parries the promoter would catch only two: at t=87.75 s the
+    # opponent's lunge probability is 0.001 against the promoter's 0.60 floor, so the
+    # co-occurrence cue simply is not there and only the short window sees the parry.
+    # The two mechanisms use different evidence — opponent context vs temporal
+    # resolution — and neither subsumes the other.
+    #
+    # Parry over-prediction is NOT mainly this logic; it comes from the LONG window,
+    # i.e. the model. The veto also cleans up after it: on bout 4 it killed exactly the
+    # two fires that had no parry label and kept the four that did.
     if (short_label in FAST_CLASSES and short_conf >= FAST_CONF
             and (long_label is None or short_conf > long_conf)):
         track.label, track.conf = short_label, short_conf

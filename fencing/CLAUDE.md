@@ -109,8 +109,8 @@ staged diff and commits himself.
 
 ## READ THIS BEFORE TRUSTING ANY METRIC HERE
 
-This is the most important section in the file. Nine "improvements" have been measured,
-believed, and retracted. They come in exactly two shapes.
+This is the most important section in the file. Ten "improvements" have been measured,
+believed, and retracted. Nine come in two shapes; the tenth is its own.
 
 ### Shape 1 — measuring how the CLIPS WERE CUT, not fencing
 
@@ -160,6 +160,42 @@ column sitting in the same table.
    flat on bout 1, the strongest axis on bout 4. Three metrics agreeing on one bout is still one
    bout. Caught only because bout 4's run was already queued.
 
+### Shape 3 — comparing a threshold against the WRONG QUANTITY
+
+### RETRACTED: the fast path is dead code (2026-08-13)
+
+10. **`FAST_CLASSES` "is unreachable and has never fired."** The arithmetic was: the override needs
+    short-window parry ≥ `FAST_CONF` = 0.65, and parry probability maxes at **0.106**, so it is
+    ~6× out of reach. Both numbers were real. They describe **different windows.** 0.106 came from
+    the cached LONG-window probability vectors; the override reads the **SHORT** 25-frame window,
+    where a 0.6 s parry fills most of the span instead of being diluted across 2 s. Measured
+    short-window parry confidence reaches **0.94**.
+
+    Re-measured against `action_opp5` by instrumenting the branch:
+
+    | | fires | windows | in labelled time |
+    |---|---|---|---|
+    | bout 1 | 0 | 1242 | — |
+    | bout 5, 300-400s | 2 | 1194 | 0 |
+    | bout 4, 60-200s | 6 | 1674 | **4, all four true parries** |
+
+    Every scorable fire is a true parry, and all four are `retreat`+`parry` — the same
+    parry-while-retreating case the promoter exploits. **Deleting it would have removed live parry
+    detections from the one class this session was spent improving.**
+
+    Three things this teaches beyond the specific bug. **The dilution effect was already documented
+    twice in this file** (it sets `BLADE_SPAN` to 0.35 s and makes `last` pooling beat `mean`) and
+    still was not applied when it mattered. **The path did not die, it MOVED** — bout 1 is where
+    the original sizing measured 16+5 fires and now gives zero, so a one-bout check would have
+    confirmed "dead" just as wrongly as it would have confirmed "alive". And **"verify before
+    removing" was already written next to the claim**; the retraction only happened because that
+    instruction was followed instead of the conclusion above it.
+
+    It is also not redundant with the parry promoter, the other argument for deleting it: the
+    promoter would catch only two of the four, because at t=87.75 s the opponent's lunge
+    probability is 0.001 against a 0.60 floor. Opponent context and temporal resolution are
+    different evidence and neither subsumes the other.
+
 ### Practical rules, earned the hard way
 
 - **Precision next to recall, always.** Recall alone proves nothing; #5 above is the canonical
@@ -177,6 +213,10 @@ column sitting in the same table.
   re-run: identical distribution, identical parameter count, no alignment. Blade energy read
   "+1.6 pts mean, positive on both held-out bouts" and the control reproduced the whole effect
   on one of them. One extra run; it is the difference between a feature and a null.
+- **A threshold comparison is only valid against the SAME QUANTITY.** Before concluding a branch
+  is unreachable, check that the number you are comparing to the threshold is the one the branch
+  actually reads. #10 compared a long-window probability against a short-window threshold and
+  nearly deleted working code. Instrument the branch and count; it is one run.
 - **An AUC is only valid for the UNIT it was measured on.** Blade/torso scores 0.79 on hand-cut
   intervals and 0.53 on the 2 s windows the model actually consumes. Same data, same feature,
   different question. Check the unit before quoting a separability number.
@@ -623,9 +663,10 @@ through idle/repositioning and light up only on real actions. Verified on clips 
 
 The demo also runs **multi-scale windows**: a 25-frame short window for fast actions and a
 60-frame long window for sustained ones, where a confident (≥ `FAST_CONF` = 0.65) fast-class hit
-on the short window overrides the long-window label. **⚠ That path is effectively dead** — see
-the FAST_CLASSES entry in the findings log; parry probability maxes at 0.106, roughly 6× below
-the threshold.
+on the short window overrides the long-window label. It fires rarely (8 times in 2868 windows
+across bouts 4 and 5) but **precisely**: all four fires that land in labelled time are true
+parries. Previously recorded here as "effectively dead" — that was **wrong**, see
+[the retraction](#retracted-the-fast-path-is-dead-code-2026-08-13).
 
 ### What "done" looks like
 
@@ -1143,10 +1184,12 @@ of labels, priors or thresholds can move an output this uninformative.** It need
 information the pose keypoints do not carry, or a window short enough not to average a 0.92 s
 action across 2.0 s.
 
-**Dead code path found by the same measurement:** `FAST_CLASSES = {"parry"}` lets the short window
-override the long one, but requires `short_conf > FAST_CONF = 0.65`. Parry probability maxes at
-0.106. The one mechanism built specifically to rescue parry is **unreachable by roughly 6× and
-has likely never fired.** Verify before removing or re-tuning it.
+**Dead code path found by the same measurement — and it was NOT dead.** The claim was:
+`FAST_CLASSES = {"parry"}` requires `short_conf > FAST_CONF = 0.65` while parry probability maxes
+at 0.106, so the mechanism is unreachable by ~6× and has never fired. The "verify before removing"
+caveat attached to it turned out to be the only part worth keeping — see
+[the retraction](#retracted-the-fast-path-is-dead-code-2026-08-13). **0.106 is the LONG-window
+figure; the override reads the SHORT window, where parry reaches 0.94.**
 
 Also on bout 3: **`advance` had become the default class** — 152 predictions for 60 true windows,
 swallowing 51 of 64 lunges (lunge recall 9%), exactly the pathology `lunge` had before the prior
