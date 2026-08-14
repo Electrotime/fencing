@@ -95,11 +95,23 @@ def main() -> int:
             blade99_n = d["blade_p99"] / np.maximum(glob, 1e-6)
         else:
             ratio99 = blade99_n = np.full_like(blade, np.nan)
+        # v2: oriented strip differenced against the fencer's OWN torso alignment.
+        # `ctrl` is the same-size strip laid across the torso, so strip/ctrl asks
+        # "is the blade moving beyond whatever body motion survived the alignment" --
+        # the same question ratio asked in v1, but of a measurement that can see it.
+        if "strip" in d.files:
+            strip, ctrl = d["strip"], d["ctrl"]
+            sratio = strip / np.maximum(ctrl, 1e-6)
+            sratio99 = d["strip_p99"] / np.maximum(d["ctrl_p99"], 1e-6)
+            strip_n = strip / np.maximum(glob, 1e-6)
+        else:
+            sratio = sratio99 = strip_n = np.full_like(blade, np.nan)
 
     # collect per INTERVAL, not per frame: frames inside one interval are highly
     # correlated, so per-frame AUC would look far more confident than it is.
     # column order must match COLS below; index 0 is the label
-    COLS = ["blade/torso", "blade/glob", "torso/glob", "p99 bl/to", "p99 bl/gl"]
+    COLS = ["blade/torso", "blade/glob", "torso/glob", "p99 bl/to", "p99 bl/gl",
+            "V2 str/ctrl", "V2 p99 s/c", "V2 str/glob"]
     per_interval = []
     for s in ("A", "B"):
         m_slot = slot == s
@@ -115,7 +127,8 @@ def main() -> int:
                 # bad frame from a pose glitch
                 return float(np.percentile(x, 90)) if len(x) else np.nan
             per_interval.append((lab, hi(ratio), hi(blade_n), hi(torso_n),
-                                 hi(ratio99), hi(blade99_n)))
+                                 hi(ratio99), hi(blade99_n),
+                                 hi(sratio), hi(sratio99), hi(strip_n)))
 
     print(f"{len(per_interval)} intervals with >=3 measured frames\n")
     print(f"{'class':<11}{'n':>4}" + "".join(f"{c:>13}" for c in COLS))
@@ -136,7 +149,7 @@ def main() -> int:
     for title, neg in (("blade-action vs quiet", QUIET),
                        ("blade-action vs footwork", FOOTWORK),
                        ("blade-action vs everything else", QUIET | FOOTWORK)):
-        vals = [auc(pool(BLADE_ACTION, c), pool(neg, c)) for c in range(1, 6)]
+        vals = [auc(pool(BLADE_ACTION, c), pool(neg, c)) for c in range(1, len(COLS) + 1)]
         print(f"{title:<34}" + "".join(f"{v:>13.2f}" for v in vals))
     print("  (col 3 is the TORSO control: if it matches the blade columns, the "
           "blade box\n   is reading body motion and the feature is worthless)")

@@ -21,6 +21,8 @@ each other** — a checkpoint's pooling mode and feature width are part of its i
 | `POOL_MODE` | `"last"` | a wrong mode loads SILENTLY (identical parameter shapes) |
 | `USE_OPPONENT` | `True` | 13 agg features; a wrong `n_agg` RAISES |
 | `APPLY_CLASS_PRIOR` | `False` | retired 2026-08-09, no longer needed |
+| `PARRY_NEEDS_ATTACKER` | `True` | no parry unless the opponent is attacking (86% of real parries) |
+| `PARRY_OPP_LUNGE_MIN` | `0.20` | parry precision 29% → **55%** on held-out bout 4 |
 
 ### Where accuracy stands
 
@@ -48,7 +50,11 @@ that cross-venue is unmeasured for the shipped model.
 
 ### What is open
 
-1. **`parry`** — the long-standing worst class, and no longer hopeless. See
+1. **`parry` — precision is SOLVED (55%), recall is not (17%).** The parry gate fixed the false
+   positives; what remains is that the model still misses ~5 of 6 real parries. Recall is now the
+   whole problem, and the indicated route is a better blade FEATURE (blade motion energy, whose
+   two known measurement flaws are untested — see its entry). More labels also buy recall, per the
+   ablation below. Older framing, still relevant for the two-head option: See
    [two heads](#two-heads-aarons-two-indicator-framing-2026-08-09): parry precision scales with
    the number of two-track blade labels (189 labels → chance; 1329 → 2× base rate). Blocked by a
    catch-22: bout 4 is simultaneously the only adequate training set and the only adequate eval
@@ -82,11 +88,15 @@ that cross-venue is unmeasured for the shipped model.
    precision on bout 4, so 85% of lit lamps would be wrong, and the good threshold differs per
    bout. Labels buy recall, opponent context buys precision; the next lever is a better blade
    FEATURE, not more of the same labels.
-3. **Filler rejection**, which is now the blocker on the timeline being usable on full
+3. **Wire `blade/torso` in as a 7th engineered feature** and score held-out accuracy — the
+   indicated route to parry RECALL (17%), now that the gate has fixed precision. Best
+   single-feature parry AUC on record (0.79 over 70 parries), but `stance_ratio` had 0.91 and
+   hurt the model, so this is a measurement to run, not a result. Needs re-extraction.
+4. **Filler rejection**, which is now the blocker on the timeline being usable on full
    broadcasts rather than bout segments. Three attempts have failed: the geometric gate (36%
    precision), and duration + confidence gating, which cannot push filler below ~26% of emitted
    events. The one untested idea is the scoreboard/timer overlay region.
-4. **Phase 5** (touch predictor) — the only unbuilt phase with a real design behind it.
+5. **Phase 5** (touch predictor) — the only unbuilt phase with a real design behind it.
 
 ### Standing workflow rule
 
@@ -125,6 +135,10 @@ column sitting in the same table.
 
 4. **Blade p99 energy.** 0.70 AUC on bout 2 (n=4 parries); a mechanism was written into this
    file for why p99 beats the mean. Bout 1 gave 0.49, pooled 0.55 vs the mean's 0.59.
+   *Confirmed 2026-08-13 at n=70: p99 0.66, mean 0.79. The retraction was right.*
+   **But the accompanying conclusion that blade energy DOESN'T WORK was itself wrong** — at n=6
+   nothing was measurable; the mean scores 0.79 at n=70. A null from an underpowered sample is
+   not a null, and this file said so at the time and then closed the idea anyway.
 5. **Per-frame model routing.** Lunge recall 9% → 78% on bout 3. Checked on all three: recall
    replicated (81/74/78%) but precision was 3/29/26% and it fired lunge on 60% of bout 1's
    windows against a 2% true share. A saturated class, not a detector.
@@ -896,12 +910,62 @@ between moments — much weaker support than originally claimed.
 The schema argument does not depend on those numbers and still holds: a fencer genuinely parries
 WHILE retreating, and six mutually-exclusive classes cannot express both.
 
-### BLADE MOTION ENERGY instead of blade DETECTION — does not work as implemented (2026-08-05)
+### BLADE MOTION ENERGY — ⚠ REOPENED 2026-08-13, IT WORKS (0.79). The v1 null was underpowered
 
 Aaron: "the problem with fast blades is that in the video sometimes it just disappears or it's
 only a blur." Right, and that kills the detector on its own terms — there is nothing sharp in
 those pixels, so more training frames cannot help. But blur is high frame-DIFFERENCE energy, so
 the property that breaks a detector is the one a motion measure wants.
+
+**Everything dated 2026-08-05 below was concluded from SIX parry intervals.** Re-scored over
+**70 parries / 616 intervals** (bouts 3-5), pooled in one shot by `pool_blade_energy.py`:
+
+| parry vs non-blade | pooled | bout 3 (n=11) | bout 4 (n=46) | bout 5 (n=13) |
+|---|---|---|---|---|
+| **v1 blade/torso (the MEAN)** | **0.79** | 0.62 | **0.79** | **0.75** |
+| v1 p99 | 0.66 | 0.75 | 0.68 | 0.81 |
+| v2 strip/ctrl (oriented, body-aligned) | 0.66 | 0.63 | 0.58 | 0.58 |
+| v2 p99 | 0.55 | 0.58 | 0.50 | 0.52 |
+
+**Blade motion energy WORKS — it was closed on a sample too small to see it.** 0.79 is the best
+single-feature parry AUC this project has produced, and it survives the HARD comparison:
+blade-action vs footwork 0.77, which is where a naive "motion" feature gets exposed, since during
+an advance the whole fencer moves and the torso control divides that out.
+
+The file predicted this at the time: "6 parry intervals cannot settle anything either way, which
+is the concrete answer to *should I get more parry intervals*: **yes, that is exactly what they
+resolve**." They did.
+
+**AND THE TWO 2026-08-13 "FIXES" MADE IT WORSE — v2 scores 0.66 against v1's 0.79.** Both flaws
+named at the bottom of this section were real, both were fixed, and the crude version still wins:
+
+- *oriented strip* replacing the axis-aligned box — verified 30x more sensitive to a moving
+  diagonal on synthetic frames
+- *fencer's-own-torso alignment* replacing the global pan shift — recovers a known translation to
+  0.01 px and flattens a pure translation to 27% residual
+
+`blade_energy.py --self-test` asserts both, so this is not a geometry bug. Best untested guess:
+`STRIP_HALFWIDTH` was halved to 0.45 forearm lengths because a blade is thin — but the strip is
+anchored on the WRIST KEYPOINT, and a few pixels of pose error slide a narrow strip off the blade
+while a fat box still contains it. **Tolerance of pose noise may be what the "wasteful" box was
+actually buying.** Testing that costs a 2 h re-run at a wider strip; not done.
+
+*A real bug found while building v2, worth remembering:* `prev_gray = gray` executes BEFORE the
+per-fencer loop, so anything reading `prev_gray` in that loop differences a frame against itself
+and reads zero motion everywhere — a clean, convincing null result for entirely the wrong reason.
+
+*Also settled: the p99 retraction was CORRECT.* Pooled p99 is 0.66 against the mean's 0.79, so
+the mean was always better and bout 2's p99 = 0.70 was noise, exactly as recorded.
+
+**NEXT STEP IS NOT MORE MEASUREMENT.** Wire `blade/torso` in as a 7th engineered feature and
+score held-out accuracy. Remember `stance_ratio`: the best AUC ever tried here (0.91) and it
+still made the model WORSE. AUC says a signal exists, never that the model lacks it. This needs
+re-extraction because `agg` is cached — and parry RECALL (17%) is the metric it should move,
+since the parry gate already fixed precision.
+
+---
+
+*Original 2026-08-05 entry follows, superseded above but kept for the method note.*
 
 `scripts/blade_energy.py` measures mean/p99 frame-difference inside a box projected along the
 forearm (camera pan removed first; an equal-area TORSO box as control).
@@ -1354,6 +1418,84 @@ looks like. On bout 3 precision moves 0%→33% across the sweep, which is what r
 signal looks like.
 
 **These numbers predate opponent context. Re-run with `--pool last` + opponent before acting.**
+
+### SHIPPED: THE PARRY GATE — a parry needs an attacker. Precision 29% → 55% (2026-08-13)
+
+Aaron: "lunge and parry are usually together (not always, but many times they are)."
+
+Measured across bouts 3-5, taking each labelled interval and asking what the OPPONENT is
+doing at the same moment (67 parries, 89 lunges):
+
+| during a PARRY, the opponent is | | during a LUNGE, the opponent is | |
+|---|---|---|---|
+| lunge + extension | **76%** | retreat + parry | 48% |
+| advance + extension | 10% | lunge + extension | 15% |
+| **attacking in some form** | **86%** | **parrying in some form** | 58% |
+
+**The relationship is ASYMMETRIC and that is what makes it usable.** A parry is a RESPONSE —
+it essentially does not happen unless someone is coming at you (86%). A lunge is only a
+coin-flip to draw one (58%). So the rule runs one way only: opponent-attacking gates parry,
+never the reverse.
+
+`demo_video._apply_parry_gate` drops a `parry` call unless the opponent's lunge probability
+clears `PARRY_OPP_LUNGE_MIN = 0.20`, demoting it to that fencer's own runner-up class. It runs
+after BOTH tracks have predicted, so each fencer sees the other's distribution for the same
+frame, and it is wired into all three prediction loops (demo, `evaluate_labels`, `draft_labels`)
+so scoring measures what the demo shows.
+
+Offline on cached held-out probabilities, two bouts at two venues:
+
+| | overall | parry precision |
+|---|---|---|
+| bout 4 (verify_h4) | 67.4% → **68.2%** | 18% → **38%** |
+| bout 5 (action_opp) | 57.0% → **58.7%** | 12% → **27%** |
+
+**End-to-end on held-out bout 4 with the current checkpoint, and it beat the offline estimate:**
+
+| held-out bout 4 | gate off | **gate on** |
+|---|---|---|
+| overall | 71.3% | **72.2%** |
+| parry precision / recall | 29% / 19% | **55% / 17%** |
+| viewer view, parry precision | 42% | **61%** |
+
+**Precision nearly doubles and recall barely moves** (19% → 17%), because a better base model
+leaves fewer true parries for the gate to remove. 55% is by a wide margin the best parry
+precision this project has recorded.
+
+**Overall accuracy goes UP as well**, which is the tell that this is not a precision/recall
+trade being spun: the suppressed parries were mostly wrong, so the runner-up class is more often
+right. Threshold 0.2 is best-or-tied on both bouts — what a venue-INDEPENDENT rule looks like,
+in contrast to the fencing gate whose best cue inverted between venues.
+
+**Why this worked where more labels did not.** The model already receives the opponent's six
+engineered features; what it never receives is the opponent's predicted CLASS, because the two
+fencers are classified independently. This couples them at decision time — the cheapest possible
+joint decoding.
+
+**⚠ THE SAME TRICK DOES NOT WORK FOR DIRECTION — checked before building it.** The obvious next
+step looked like "advance and retreat must be opposite", and Aaron stopped it: "many times both
+fencers will still advance to each other." The labels agree (315 overlapping interval pairs,
+bouts 3-5):
+
+| left | right | n | share |
+|---|---|---|---|
+| advance | retreat | 41 | 13% |
+| retreat | advance | 40 | 13% |
+| **advance** | **advance** | **37** | **12%** |
+| lunge | retreat | 29 | 9% |
+| lunge | lunge | 7 | 2% |
+
+**Both fencers moving forward is 18% of pairs against 43% opposed.** A hard opposite-direction
+rule would be wrong about one time in five, and wrong specifically during the approach that opens
+every phrase. P(opponent retreating | I advance) is 47% — nothing like the parry conditional's
+86%.
+
+*Method note:* the tempting evidence for the direction rule was the slot-bug finding that the
+model is "81% opposite when it commits to both directions". That is conditioned on the model
+having already predicted one advance and one retreat — a statement about model outputs, not
+about how often the truth is opposed. Generalising a conditional into a prior is the same error
+shape as the retracted "parry precision scales with blade supervision", which compared rates
+across different base rates.
 
 ### PARRY LAMP, corrected (2026-08-13): labels buy RECALL, opponent buys PRECISION
 
@@ -1916,8 +2058,9 @@ between phrases looks like. The video is fine.
 ### Blade
 
 - Blade DETECTION as an action-model input — 1-2% frame coverage, killed by motion blur
-- Blade motion ENERGY as implemented (pooled parry AUC 0.55-0.59, chance) — but the 100% coverage
-  is real, and the box geometry / pan compensation were never fixed before it was closed
+- ~~Blade motion ENERGY (pooled parry AUC 0.55-0.59, chance)~~ **⚠ NOT a dead end — REOPENED
+  2026-08-13. At n=70 parries the mean blade/torso ratio scores 0.79.** The v1 null came from
+  6 parries. The ORIENTED-STRIP rewrite is the dead end (0.66); the crude axis-aligned box wins.
 
 ---
 
