@@ -61,3 +61,13 @@ fencing/models/verify_*.pth
 # _verifyopp, then _held) and each new --tag slipped past them: `_heldb5` and `_gate`
 # both landed in commits before anyone noticed. Matching any tag is the fix.
 fencing/data/labels/*_probs_*.npz
+
+# CLAUDE.md is the working findings log -- kept LOCAL, deliberately untracked
+# (git rm --cached, 2026-08-14). It is a candid lab notebook: retractions, dead
+# ends, and half-finished reasoning aimed at whoever is working on the code next.
+# The README carries the public version of the same material.
+#
+# NOTE it remains in the git HISTORY already pushed to origin. Untracking stops
+# future changes from being published; it does not erase what is there. Purging
+# it properly needs a history rewrite (git filter-repo / BFG) and a force push.
+fencing/CLAUDE.md

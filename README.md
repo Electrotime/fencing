@@ -88,7 +88,7 @@ Per held-out bout, with the full decision path:
 
 ## Evaluation protocol
 
-Ten measured improvements were later retracted during development. The full log is in `CLAUDE.md`. The protocol below exists because of them.
+Ten measured improvements were later retracted during development. The protocol below exists because of them.
 
 - **Leave-one-bout-out, never a random split.** Windows are emitted every 5 frames from a 60-frame span, so adjacent windows share 92% of their frames and a random split reports fiction.
 - **Shuffled control for every new feature.** Adding an input also widens the classifier head, so part of any gain is capacity rather than information. Permuting the new column within each bout and re-running separates the two. Blade energy scored +1.6 points and was positive on both held-out bouts; the shuffled control reproduced the entire effect.
@@ -132,7 +132,6 @@ fencing/
                venue_motion.py, bout_timeline.py
   data/        raw_video/, labels/ (interval CSVs), train_continuous/ (cached windows)
   models/      action_opp5.pth (shipped checkpoint)
-  CLAUDE.md    full findings log, including retracted results
 ```
 
 ## Built with
