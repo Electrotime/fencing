@@ -117,10 +117,44 @@ that cross-venue is unmeasured for the shipped model.
    cannot tell — and would produce this error precisely (fencer advances, camera follows,
    `diff(hip_x)≈0`, pan wrongly 0, so `world_vel≈0` reads as walking). Measured on bout 5: the
    fallback fires on **0.2% of frames and 0.0% of both the correct and the wrong windows.** Not
-   this. Two candidates remain and are not yet separated: the pan estimate under-reporting
-   during fast pans while still returning a value, or motion blur degrading the POSE during
-   fast pans. **The route is a better pan estimate or a camera-invariant reformulation, not
-   more data.**
+   this.
+
+   **MOTION BLUR ALSO RULED OUT.** If blur were degrading the pose during fast pans, pose
+   quality would fall as pan rises. It does not — mean landmark visibility and frozen-joint
+   fraction each separate high-pan from low-pan windows at **AUC 0.51**. On the windows that
+   actually go wrong the pose is if anything *cleaner* than on the correct ones (visibility
+   0.925 vs 0.905, frozen 0.003 vs 0.008) while |pan| separates them at 0.64. **The skeleton is
+   fine; the pan term is what is wrong.**
+
+   **FOUND IT: the strip estimator under-reports large pans** (`venue_motion.py --estimators`).
+   `_frame_pan` reads two narrow border strips (`PAN_STRIP_FRAC` 0.22, ~70 px of a 320 px
+   frame). Edges are where the background lives — but they are also where content **enters and
+   leaves** during a pan, so the strips stop being a pure shift of one another, which is exactly
+   what phase correlation assumes. Against a full-frame correlation over the same row band on
+   bout 5:
+
+   | frames in the top N% of full-frame motion | strips report | sign disagrees |
+   |---|---|---|
+   | top 10% (n=1730) | **47%** of full | 18.6% |
+   | top 5% (n=865) | **38%** of full | 19.3% |
+   | top 1% (n=173) | **23%** of full | 20.8% |
+
+   Overall correlation between the two estimators is **0.304**, and widening the strips 2×
+   moves the estimate toward the full-frame one — the direction expected if the narrow aperture
+   is the deficient part. Neither is declared ground truth (a full-frame correlation can be
+   pulled by the fencers themselves), but they disagree by 2-4× precisely on the frames the
+   feature depends on, and one of them is badly wrong.
+
+   This closes the diagnosis: camera follows the advancing fencer → `diff(hip_x) ≈ 0` → the pan
+   correction that should restore the real motion arrives at a third of its true size (with the
+   wrong sign a fifth of the time) → `world_vel ≈ 0` → **`walking`**.
+
+   **The fix needs re-extraction AND retraining, so it is not a one-line change.** The cached
+   windows store normalised keypoints but not per-frame `hip_x`, so `forward` and `total_travel`
+   cannot be recomputed offline to validate a new estimator; and changing the estimator changes
+   two of the six engineered features, i.e. the model's inputs. Sequence: pick an estimator,
+   re-extract all five bouts, retrain, leave-one-bout-out. **Worth doing before the third venue
+   arrives** — otherwise that venue measures the same bug twice instead of a fix.
 4. **Phantom labels over broadcast filler** — real, but **4× smaller than the headline
    (rescoped 2026-08-13).** "63% of predictions fall outside labelled fencing" counts every
    prediction; what a viewer actually sees is the display, and over bout 4's 4505

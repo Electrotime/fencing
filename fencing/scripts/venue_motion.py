@@ -51,9 +51,39 @@ when both strips fall below PAN_MIN_RESPONSE -- asserting "camera still" exactly
 cannot tell, which would produce this error precisely: fencer advances, camera follows,
 diff(hip_x)~0, pan wrongly 0, world_vel~0, reads as walking. Measured on bout 5 the
 fallback fires on 0.2% of frames and 0.0% of both the correct and the wrong windows.
-Not it. Still open: under-reported pan during fast pans, or motion blur degrading POSE.
+
+MOTION BLUR ALSO RULED OUT. If blur were degrading the pose during fast pans, pose
+quality would fall as pan rises. It does not: mean landmark visibility and frozen-joint
+fraction both separate high-pan from low-pan windows at AUC 0.51. On the windows that
+actually go wrong the pose is if anything CLEANER than on the correct ones (visibility
+0.925 vs 0.905, frozen 0.003 vs 0.008) while |pan| separates them at 0.64. The skeleton
+is fine; the PAN TERM is what is wrong.
+
+WHICH LEAVES THE ESTIMATOR, and `--estimators` shows how it fails. _frame_pan reads two
+narrow border strips (PAN_STRIP_FRAC = 0.22, ~70 px of a 320 px frame). Edges are where
+background lives -- but they are also where content ENTERS AND LEAVES during a pan, so
+the two strips stop being a pure shift of one another, which is precisely what phase
+correlation assumes. Measured on bout 5 against a full-frame correlation over the same
+row band:
+
+    frames in the top N% of full-frame motion      strips report    sign disagrees
+      top 10%   (n=1730)                             47% of full        18.6%
+      top  5%   (n= 865)                             38% of full        19.3%
+      top  1%   (n= 173)                             23% of full        20.8%
+
+Overall correlation between the two estimators is 0.304. Widening the strips 2x moves
+the estimate toward the full-frame one, which is the direction expected if the narrow
+aperture is the deficient part. Note neither is declared ground truth -- the full-frame
+estimate can be pulled by the fencers themselves -- but they disagree by 2-4x exactly on
+the frames the feature depends on, and one of them is badly wrong.
+
+FIXING IT REQUIRES RE-EXTRACTION AND RETRAINING. The cached windows store normalised
+keypoints but not the per-frame hip_x, so `forward` and `total_travel` cannot be
+recomputed offline; changing the pan estimator changes two of the six engineered
+features, which changes the model's inputs.
 
 usage: py -3 scripts/venue_motion.py [--bouts 1,4,5] [--stride 1]
+       py -3 scripts/venue_motion.py --estimators 5     # strips vs full-frame vs wide
 """
 import argparse
 import sys
@@ -116,11 +146,66 @@ def pan_track(video, stride):
     return np.array([t for t, _ in out]), np.array([p for _, p in out], np.float32), fps
 
 
+def compare_estimators(stem):
+    """strips (shipped) vs full-frame vs 2x-wide strips, on the same frame pairs."""
+    cap = cv2.VideoCapture(str(VID / f"{stem}.mp4"))
+    prev, win, full_win = None, {}, None
+    S, F, W = [], [], []
+    while True:
+        ok, fr = cap.read()
+        if not ok:
+            break
+        g = cv2.cvtColor(cv2.resize(fr, (320, 180)), cv2.COLOR_BGR2GRAY).astype(np.float32)
+        if prev is not None:
+            h, w = g.shape
+            rows = slice(int(0.10 * h), int(0.75 * h))
+            S.append(D._frame_pan(prev, g, win))
+            if full_win is None:
+                full_win = cv2.createHanningWindow((w, rows.stop - rows.start), cv2.CV_32F)
+            (dxf, _), rf = cv2.phaseCorrelate(prev[rows], g[rows], full_win)
+            F.append(dxf if rf > D.PAN_MIN_RESPONSE else 0.0)
+            sw = max(10, int(2 * D.PAN_STRIP_FRAC * w))
+            if "wide" not in win:
+                win["wide"] = cv2.createHanningWindow((sw, rows.stop - rows.start),
+                                                      cv2.CV_32F)
+            sh = []
+            for a_, b_ in [(0, sw), (w - sw, w)]:
+                (dx, _), r = cv2.phaseCorrelate(prev[rows, a_:b_], g[rows, a_:b_],
+                                                win["wide"])
+                if r > D.PAN_MIN_RESPONSE:
+                    sh.append(dx)
+            W.append(float(np.median(sh)) if sh else 0.0)
+        prev = g
+    cap.release()
+
+    S, F, W = np.asarray(S), np.asarray(F), np.asarray(W)
+    print(f"bout {stem}: {len(S)} frame pairs\n")
+    print(f"{'estimator':<10}{'med |pan|':>11}{'p90':>9}{'p99':>9}{'corr vs strips':>16}")
+    for nm, v in (("strips", S), ("full", F), ("wide", W)):
+        print(f"{nm:<10}{np.median(np.abs(v)):>11.3f}{np.percentile(np.abs(v), 90):>9.3f}"
+              f"{np.percentile(np.abs(v), 99):>9.3f}{np.corrcoef(v, S)[0, 1]:>16.3f}")
+    for q in (90, 95, 99):
+        thr = np.percentile(np.abs(F), q)
+        m = np.abs(F) >= thr
+        print(f"\ntop {100 - q}% of full-frame motion (|full| >= {thr:.2f}, n={int(m.sum())}):")
+        print(f"   full {np.abs(F[m]).mean():.3f}   strips {np.abs(S[m]).mean():.3f}"
+              f"   = {np.abs(S[m]).mean() / np.abs(F[m]).mean():.0%} of full")
+        print(f"   sign disagreement {float((np.sign(S[m]) != np.sign(F[m])).mean()):.1%}")
+    print("\nNeither is ground truth -- a full-frame correlation can be pulled by the")
+    print("fencers. But they disagree 2-4x exactly where the feature needs the pan, and")
+    print("widening the strips moves them TOWARD the full-frame answer.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bouts", default="1,4,5")
     ap.add_argument("--stride", type=int, default=1)
+    ap.add_argument("--estimators", metavar="BOUT",
+                    help="compare pan estimators on one bout instead")
     a = ap.parse_args()
+    if a.estimators:
+        return compare_estimators(a.estimators)
 
     print(f"{'bout':<6}{'venue':>6}{'frames':>9}{'|pan| med':>11}{'|pan| p90':>11}"
           f"{'still %':>9}{'adv |pan|':>11}{'walk |pan|':>12}{'ratio':>8}")
