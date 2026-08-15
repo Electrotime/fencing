@@ -20,6 +20,7 @@ HELDOUT = {
     "4": ("4_probs_heldb5.npz", "bout4_intervals_2track.csv", "verify_h4_b5 (bouts 1,2,3,5)"),
     "5": ("5_probs_held.npz",   "bout5_intervals_2track.csv", "action_opp (bouts 1-4)"),
     "1": ("1_probs_heldb5.npz", "bout1_intervals.csv",        "verify_h1_b5 (bouts 2,3,4,5)"),
+    "7": ("7_probs_held.npz",   "bout7_intervals_2track.csv", "verify_h7 (bouts 1-5)"),
 }
 
 # shipped gate, mirrored from demo_video so this scores the real starting point

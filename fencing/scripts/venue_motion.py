@@ -34,8 +34,15 @@ LAB = PROJECT / "data" / "labels"
 VID = PROJECT / "data" / "raw_video"
 CSV_FOR = {"1": "bout1_intervals.csv", "2": "bout2_intervals.csv",
            "3": "bout3_intervals_2track.csv", "4": "bout4_intervals_2track.csv",
-           "5": "bout5_intervals_2track.csv"}
-VENUE = {"1": "A", "2": "A", "3": "A", "4": "A", "5": "B"}
+           "5": "bout5_intervals_2track.csv", "7": "bout7_intervals_2track.csv"}
+VENUE = {"1": "A", "2": "A", "3": "A", "4": "A", "5": "B", "7": "C"}
+# bout 7 must be read from 7_30fps.mp4; the original is 60 fps and every window
+# constant in this project is counted in frames
+VIDEO_FOR = {"7": "7_30fps.mp4"}
+
+
+def video_for(stem):
+    return VID / VIDEO_FOR.get(stem, f"{stem}.mp4")
 
 
 def pan_track(video, stride):
@@ -62,7 +69,7 @@ def pan_track(video, stride):
 
 def compare_estimators(stem):
     """strips (shipped) vs full-frame vs 2x-wide strips, on the same frame pairs."""
-    cap = cv2.VideoCapture(str(VID / f"{stem}.mp4"))
+    cap = cv2.VideoCapture(str(video_for(stem)))
     prev, win, full_win = None, {}, None
     S, F, W = [], [], []
     while True:
@@ -125,7 +132,7 @@ def main() -> int:
           f"{'still %':>9}{'adv |pan|':>11}{'walk |pan|':>12}{'ratio':>8}")
     rows, pan_cache = {}, {}
     for stem in a.bouts.split(","):
-        video = VID / f"{stem}.mp4"
+        video = video_for(stem)
         if not video.exists():
             print(f"{stem:<6}  (no video)")
             continue
