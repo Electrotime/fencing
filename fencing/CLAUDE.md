@@ -66,23 +66,83 @@ that cross-venue is unmeasured for the shipped model.
    the number of two-track blade labels (189 labels → chance; 1329 → 2× base rate). Blocked by a
    catch-22: bout 4 is simultaneously the only adequate training set and the only adequate eval
    set for it. **Aaron's 10-minute label pass breaks that.**
-2. **`neutral`** — 90% precision, 29% recall. Aaron: "neutral is sometimes called when someone
-   does slower things or slows down." His definition is *continuous seconds of relative
-   stillness*, so slow MOVEMENT reading as neutral is a genuine error, not a labelling
-   disagreement.
+2. ~~**`neutral`** — 90% precision, 29% recall.~~ **DEPRIORITISED 2026-08-13, and the numbers
+   were stale.** On current held-out caches neutral is **55% precision / 55% recall**, not
+   90/29. More to the point, recall was the wrong question: `QUIET_CLASSES = {neutral, walking}`
+   render **identically** as "ready", so a neutral↔walking mix-up is invisible to a viewer.
+   Pooled over 1156 true-neutral windows: 55% called neutral, **26% called walking (invisible)**,
+   19% called a real action — and only that last 19% is a defect anyone can see. Quiet-vs-action
+   recall is 86-92% per bout. Aaron's "slower things or slows down" is a real labelling boundary,
+   but it sits between two classes that produce the same pixels. Chasing it buys almost nothing.
 3. **`lunge`** — 33% recall on held-out bout 1. Transient, same shape of problem as parry.
-3b. **`advance` → `walking` at a new venue.** 282 of bout 5's 869 true advances, by far its
-   largest error. These two classes are separated only by posture, via the crouch feature
-   (knee angle ~140° fencing vs ~164° upright), and a different camera height shifts exactly
-   that measurement. **The most concrete lead for what breaks off-venue, and it is one feature
-   deep.** Bout 5 is now available to train on, which is the first thing to try.
-4. **Phantom labels over broadcast filler.** 63% of the demo's predictions on bout 4 fall
-   outside labelled fencing — the overlay confidently labels replays, crowd shots and graphics.
-   Per-window scoring never sees this (unlabelled time is excluded) but it is most of what a
-   viewer watches, and it is what holds the event timeline to 38% precision on a broadcast
-   against 68% on a clean bout segment. The cheap geometric gate does **not** work; see
+3b. **`advance` → `walking` at a new venue** — 282 of bout 5's 869 true advances, still the
+   largest single error. ~~Separated only by posture via the crouch feature, and a different
+   camera height shifts exactly that measurement — one feature deep.~~ **THAT DIAGNOSIS IS WRONG
+   (measured 2026-08-13, `scripts/venue_motion.py`).** Crouch is bout 5's *best* feature, and its
+   knee-angle gap (18.7°) matches bout 4's (17.2°) almost exactly:
+
+   | advance vs walking, AUC | b1 | b2 | b3 | b4 | b5 (venue B) |
+   |---|---|---|---|---|---|
+   | `crouch` (posture) | 0.92 | 0.87 | 0.95 | 0.86 | **0.79** ← holds |
+   | `stance_p90` (posture) | 0.82 | 0.84 | 0.85 | 0.82 | 0.74 |
+   | `net_forward` (motion) | 0.73 | 0.69 | 0.78 | 0.73 | 0.62 |
+   | `total_travel` (motion) | 0.49 | 0.56 | 0.63 | 0.63 | **0.34** ← INVERTS |
+
+   What breaks is the **motion pair**, and `total_travel` does not weaken, it inverts: bout 5's
+   median walking window travels 2.46 against advance's 1.57, the reverse of every other bout.
+   The split is principled — posture features run on hip-centred, torso-normalised skeletons and
+   are camera-invariant by construction, while motion features are built on
+   `world_vel = diff(hip_x) − pan/PAN_WIDTH`, where the pan term is an ESTIMATE. Measured
+   directly, venue B's camera pans **1.7× harder** than bout 4's (median |pan| 0.664 vs 0.394)
+   and is still only 16% of the time against 28%. Same channel that inverted the fencing gate's
+   best cue.
+
+   **The causal test, and it replicates at BOTH venues.** Aggregate pan is circumstantial; what
+   matters is whether the windows the model gets wrong are the ones the camera was moving
+   through. Per-window mean |pan| joined against held-out predictions:
+
+   | true-`advance` windows | called correctly | called `walking` | AUC |
+   |---|---|---|---|
+   | bout 5 (venue B) | n=348, median 0.843 | n=282, median **1.310** | 0.63 |
+   | bout 4 (venue A) | n=551, median 1.453 | n=27, median **2.075** | 0.79 |
+
+   Same direction both venues, and stronger at bout 4 despite only 27 errors there. Combined
+   with venue B's 1.7× busier camera, that explains the error-rate gap: 32% of bout 5's true
+   advances against 3.6% of bout 4's. **Camera pan is the mechanism; the venue only sets how
+   often it happens.** Note the adv/walk pan RATIO column in `venue_motion.py` is NOT the
+   explanation and does not line up with the AUCs — the per-window test is the one to trust.
+
+   **One mechanism already RULED OUT.** `_frame_pan` returns a silent `0.0` when both border
+   strips fall below `PAN_MIN_RESPONSE`, which would assert "camera still" exactly when it
+   cannot tell — and would produce this error precisely (fencer advances, camera follows,
+   `diff(hip_x)≈0`, pan wrongly 0, so `world_vel≈0` reads as walking). Measured on bout 5: the
+   fallback fires on **0.2% of frames and 0.0% of both the correct and the wrong windows.** Not
+   this. Two candidates remain and are not yet separated: the pan estimate under-reporting
+   during fast pans while still returning a value, or motion blur degrading the POSE during
+   fast pans. **The route is a better pan estimate or a camera-invariant reformulation, not
+   more data.**
+4. **Phantom labels over broadcast filler** — real, but **4× smaller than the headline
+   (rescoped 2026-08-13).** "63% of predictions fall outside labelled fencing" counts every
+   prediction; what a viewer actually sees is the display, and over bout 4's 4505
+   confident-filler windows (gaps > 15 s) **72% render as "ready" and only 28% show a real
+   action** (advance 672, retreat 325, lunge 221, parry 56). Bout 5: 90% ready, 10% action
+   (n=50, too small to lean on). The model mostly says `walking` over filler, which is already
+   quiet — measured `p(walking)` median 0.037 → 0.274 on bout 4 and 0.199 → 0.836 on bout 5.
+   **That cue points the SAME way at both venues** (AUC 0.58 / 0.67 as a filler detector),
+   unlike the motion cue that inverted — but it is weak, and venue B has 50 filler windows to
+   validate a threshold on, so nothing is shipped. Note also that a REPLAY contains real
+   fencing, so the model calling `advance` over one is not wrong about the action, only about
+   the context — this is shot classification, not action classification. The cheap geometric
+   gate does **not** work; see
    [the gate](#is-this-fencing-gate-does-not-work-with-these-cues-not-shipped) and
    [the timeline](#event-timeline--bout-statistics-works-on-a-bout-not-on-a-broadcast-2026-08-12).
+5. **Resolution is NOT a confound (settled 2026-08-13).** Bout 1 scored twice through identical
+   code, 1080p vs a 720p downscale: per-window accuracy 76.6% → 77.7%, but coverage fell 3.8%
+   and absolute correct calls fell 2.1% (666 → 652) — the accuracy rose because it scored fewer,
+   easier windows, which is exactly the trap the coverage rule exists for. **720p costs ~2%, and
+   it lands on detection coverage, not classification.** MediaPipe resizes every crop to 256×256
+   and YOLO runs at 640, so above ~36% of frame height 1080p's extra pixels are discarded
+   anyway. A 720p third venue is fine, and any large drop on it is the VENUE, not the pixels.
 
 ### Next steps
 
@@ -329,6 +389,7 @@ Harmless to leave.
 | **evaluation** | `evaluate_labels.py` (`--model`, `--pool`, `--no-prior`, `--tag`, `--frame-model`), `estimate_class_prior.py`, `sweep_parry_promote.py` (offline decision-rule sweep over cached probabilities, with the matched own-only control; `--tune`, `--confirm`, `--self-test`) |
 | **reporting** | `bout_timeline.py` — event timeline + per-fencer statistics from a probability cache; `--sweep`, `--csv`, `--self-test` |
 | **label tooling** | `check_labels.py` (validates BOTH schemas, catches overlaps), `upgrade_labels.py`, `draft_labels.py`, `transcribe_bout4.py` |
+| **diagnostics** | `venue_motion.py` — which features survive a venue change, and the camera-pan measurement behind the answer (`--bouts`, `--stride`) |
 | **closed experiments** | `exp_pooling.py`, `exp_two_head.py`, `exp_opponent.py`, `exp_window.py`, `exp_mirror.py`, `calibrate_gate.py`, `blade_energy.py`, `analyze_blade_energy.py`, `inspect_detections.py` |
 | **misc** | `auto_clip.py` (experimental clip proposer — review output by hand), `smoke_test.py` |
 
