@@ -16,12 +16,14 @@ Held-out accuracy is 76.6% on a bout the model never trained on, compared to 16.
 ## Installation
 
 ```bash
-git clone https://github.com/<user>/fencevision.git
-cd fencevision
+git clone https://github.com/Electrotime/fencing.git
+cd fencing/fencing
 pip install -r requirements.txt
 ```
 
-Python 3.9+ is required. The shipped checkpoint is `models/action_opp5.pth`.
+Python 3.9+ is required. The shipped checkpoint is `models/action_opp5.pth`. Every path
+below is relative to the inner `fencing/` directory, which is where the package, scripts
+and data live.
 
 ## Usage
 
@@ -86,7 +88,7 @@ Per held-out bout, with the full decision path:
 
 ## Evaluation protocol
 
-Ten measured improvements were later retracted during development. The full log is in `fencing/CLAUDE.md`. The protocol below exists because of them.
+Ten measured improvements were later retracted during development. The full log is in `CLAUDE.md`. The protocol below exists because of them.
 
 - **Leave-one-bout-out, never a random split.** Windows are emitted every 5 frames from a 60-frame span, so adjacent windows share 92% of their frames and a random split reports fiction.
 - **Shuffled control for every new feature.** Adding an input also widens the classifier head, so part of any gain is capacity rather than information. Permuting the new column within each bout and re-running separates the two. Blade energy scored +1.6 points and was positive on both held-out bouts; the shuffled control reproduced the entire effect.
