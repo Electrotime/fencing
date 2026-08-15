@@ -10,31 +10,6 @@ from ultralytics import YOLO
 PERSON_CLASS_ID = 0
 MIN_CONFIDENCE = 0.4
 
-# Foreground silhouettes -- a spectator's head and shoulders along the bottom of
-# frame, and the referee -- stand between the camera and the piste. Being nearer
-# the camera they are TALLER than the fencers (measured 0.32-0.41 of frame height
-# against the fencers' 0.26-0.27), so min_h_frac cannot reach them, and being
-# still and upright they out-score a lunging fencer on confidence.
-#
-# Both thresholds are calibrated, not tuned: over 1262 tall detections across both
-# bouts, boxes running to the frame bottom have median brightness 51 in bout 1
-# (against 101 for the rest) but 106 in bout 2, whose tighter framing puts real
-# fencers' feet near the bottom edge. So NEITHER cue works alone -- a bottom-edge
-# filter would delete bout 2's fencers. Together they flag 16.2% of bout 1's
-# detections and 4.1% of bout 2's, which is the expected split: bout 1 is the wide
-# shot with people in the foreground. Fencers wear WHITE, which is what keeps them
-# clear of the brightness bound.
-#
-# Brightness is judged RELATIVE to the brightest box in the same frame, not
-# against a fixed 60. An absolute cutoff also deletes a real fencer standing in a
-# dark patch near the bottom edge, and lighting varies between venues and across a
-# single bout. Within one frame the comparison is what matters: a white uniform is
-# far brighter than a silhouette, whatever the exposure.
-#
-# Set FENCING_NO_SILHOUETTE_FILTER=1 to disable, for A/B measurement only. The
-# filter's original -3 pt cost was measured while _assign_boxes was still swapping
-# A/B slots, which corrupted direction on the same frames, so that number needs
-# re-taking against the corrected pipeline before it means anything.
 FOREGROUND_MAX_REL_MEAN = 0.55  # this dark relative to the brightest box = silhouette
 FOREGROUND_MIN_BOTTOM = 0.90    # box runs to the frame bottom, i.e. in front of the piste
 FILTER_ENABLED = os.environ.get("FENCING_NO_SILHOUETTE_FILTER", "") != "1"
@@ -50,13 +25,7 @@ def get_fencer_boxes(
     model: YOLO,
     min_h_frac: float = 0.0,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Find both fencers, return their xyxy boxes as (box_A, box_B). A = left, B = right.
-
-    If only one person shows up, whichever half of the frame they're on decides
-    the slot, and the other slot is None. min_h_frac drops detections shorter
-    than that fraction of frame height -- printed fencers on backdrop banners
-    trigger real person detections, and box size is what tells them apart.
-    """
+    """Find both fencers, return their xyxy boxes as (box_A, box_B). A = left, B = right."""
     results = model(frame, classes=[PERSON_CLASS_ID], conf=MIN_CONFIDENCE, verbose=False)
     boxes = results[0].boxes
     if boxes is None or len(boxes) == 0:
@@ -71,16 +40,6 @@ def get_fencer_boxes(
         if len(xyxy) == 0:
             return None, None
 
-    # More than 2 people means a referee, coach or spectator got picked up too.
-    #
-    # Drop foreground silhouettes FIRST, then fall back to the old top-2-by-
-    # confidence rule for whatever is left. Deliberately subtractive: three
-    # attempts to replace the confidence rule outright (continuity, capped
-    # continuity, widest-separation) all scored ~35% on bout 1 against its 45.9%,
-    # because they changed which box lands in which SLOT. Slot A faces right and B
-    # faces left, so a misassignment inverts net-forward and turns advances into
-    # retreats -- measured, 63 of 122. This only removes boxes that are provably
-    # not fencers and leaves the assignment path untouched.
     if len(xyxy) > 2 and FILTER_ENABLED:
         means = np.full(len(xyxy), np.nan)
         for i, b in enumerate(xyxy):
@@ -131,23 +90,13 @@ def get_fencer_crops(
     frame: np.ndarray,
     model: YOLO,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Crop out both fencers. A is the fencer on the left, B is on the right.
-
-    Same slot logic as get_fencer_boxes; a slot is also None if its box would
-    crop down to nothing.
-    """
+    """Crop out both fencers. A is the fencer on the left, B is on the right."""
     box_a, box_b = get_fencer_boxes(frame, model)
     return crop_box(frame, box_a), crop_box(frame, box_b)
 
 
 def _self_test_foreground() -> None:
-    """The silhouette filter needs BOTH cues. Synthetic, so it needs no video.
-
-    Guards a rule that looks over-complicated and is not. Dropping the brightness
-    test deletes bout 2's fencers, whose feet reach the frame bottom under tighter
-    framing. Making brightness ABSOLUTE instead of relative deletes any fencer in a
-    dark patch and breaks on a different venue's lighting.
-    """
+    """The silhouette filter needs BOTH cues. Synthetic, so it needs no video."""
     class _Arr:
         def __init__(self, v): self.v = v
         def cpu(self): return self

@@ -18,11 +18,7 @@ TEXT_COLOR = (255, 255, 255)
 
 def draw_skeleton(frame: np.ndarray, points: np.ndarray,
                   color: tuple[int, int, int] = BONE_COLOR) -> np.ndarray:
-    """Draw the pose skeleton onto frame (in place) and return it.
-
-    points: (33, 2) pixel coordinates. Points at (0, 0) count as missing and
-    any bone touching one is skipped.
-    """
+    """Draw the pose skeleton onto frame (in place) and return it."""
     pts = points.astype(int)
     ok = ~np.all(pts == 0, axis=1)
     for a, b in BODY_CONNECTIONS:

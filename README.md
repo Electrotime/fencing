@@ -41,7 +41,7 @@ python scripts/evaluate_labels.py data/raw_video/1.mp4 data/labels/bout1_interva
     --model verify_h1_b5.pth --no-prior
 ```
 
-Most scripts accept `--self-test` and document their evaluation setup in the module docstring.
+Most scripts accept `--self-test`, which runs their built-in assertions without touching any video.
 
 ## How it works
 

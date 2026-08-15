@@ -1,32 +1,4 @@
-"""How should the LSTM output be reduced over time? Measure, don't argue.
-
-The shipped model mean-pools across the window. Twice this project has claimed
-that this is why transient classes fail (lunge 24% recall, and Aaron's field note
-that slow movement gets called `neutral` -- both are things a 60-frame average
-would do). The first claim was retracted: it rested on a per-frame model that
-turned out to be a degenerate lunge predictor, firing lunge on 60% of bout 1's
-windows against a 2% true share. So the hypothesis has never actually been tested
-with a sound model and a proper split. This does that.
-
-Variants, all sharing the same trunk and training recipe so only the reduction
-differs:
-
-  mean     current: masked average over real frames
-  max      masked max -- a spike anywhere in the window survives, which is what a
-           0.7 s lunge inside a 2 s window IS
-  meanmax  both concatenated: sustained AND transient evidence together
-  attn     learned attention over timesteps, masked softmax
-  last     the final real timestep, no aggregation
-
-EVERY VARIANT MUST MASK THE PADDING. Clip length is strongly class-correlated
-(lunge/parry ~24 frames = 60% padding, advance 46, retreat 48, sliced
-neutral/walking 0%), so pooling over the zeros lets the model read "how much of
-this window is padding" as a class cue. That artifact previously scored WELL on
-validation and then collapsed on video -- see ActionLSTM's docstring. An unmasked
-max would be the worst offender of all, since zeros beat negative activations.
-
-usage: py -3 scripts/exp_pooling.py [--holdout 1] [--seeds 2]
-"""
+"""How should the LSTM output be reduced over time? Measure, don't argue."""
 import argparse
 import sys
 from pathlib import Path

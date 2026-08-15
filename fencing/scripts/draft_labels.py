@@ -1,29 +1,4 @@
-"""Draft a two-track label CSV from model predictions, for a human to CORRECT.
-
-Labelling 17 minutes of continuous footage from scratch is hours of work, and
-most of it is boring: walking back to en garde, stoppages, resets. The model is
-adequate at exactly that part (walking precision 65-67% across three bouts) and
-poor at the interesting part. So it drafts the boring majority and the human
-fixes the actions -- much cheaper than starting from an empty file.
-
-WHAT THIS IS NOT: ground truth. The model runs at ~42% overall. Every action
-boundary in here is a guess, and anything the model cannot do at all (parry: 0%
-across three bouts and two architectures) will simply be ABSENT. Two safeguards:
-
-  - runs whose mean confidence is below MIN_CONF are written as `TODO`, which
-    check_labels.py already refuses to pass, so they cannot be forgotten
-  - the blade column is left at `none` throughout. Parries MUST be added by hand;
-    the model contributes nothing there and pretending otherwise would bake a
-    known-blind spot into the labels
-
-ANCHORING IS THE REAL RISK. Correcting a draft biases you toward accepting what
-is written. Treat every non-quiet row as unverified, and re-watch the action
-moments rather than skimming them.
-
-usage:
-  py -3 scripts/draft_labels.py "data/raw_video/Bout #1 without break (1).mp4" \
-      --start 30 --end 330 --out data/labels/bout4_draft_2track.csv
-"""
+"""Draft a two-track label CSV from model predictions, for a human to CORRECT."""
 import argparse
 import sys
 from pathlib import Path
@@ -49,10 +24,7 @@ MIN_RUN = 0.40       # seconds; shorter runs are prediction flicker, not actions
 
 
 def merge_runs(preds, min_run):
-    """[(t, label, conf)] -> [(start, end, label, mean_conf)], consecutive equal
-    labels merged. Runs shorter than min_run are dropped rather than emitted --
-    they are almost always single-window flicker, and a label file full of 0.15 s
-    intervals is harder to correct than one with gaps."""
+    """[(t, label, conf)] -> [(start, end, label, mean_conf)], consecutive equal"""
     if not preds:
         return []
     runs, cur = [], [preds[0][0], preds[0][0], preds[0][1], [preds[0][2]]]
@@ -152,12 +124,6 @@ def main() -> int:
             if conf < MIN_CONF:
                 fw, bl = "TODO", "none"
             elif lab == "parry":
-                # `parry` is a BLADE value in this schema, never footwork -- that
-                # separation is the entire point of two tracks. The model emits a
-                # single label, so a parry call says nothing about the footwork
-                # underneath, which has to be filled in by hand. (In all three
-                # labelled bouts that footwork was `retreat`, 11 times out of 11 in
-                # bout 3 -- but do not let the draft assume it.)
                 fw, bl = "TODO", "parry"
             else:
                 fw, bl = lab, "none"

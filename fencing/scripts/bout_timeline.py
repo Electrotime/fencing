@@ -1,81 +1,4 @@
-"""Turn the per-window prediction stream into an EVENT TIMELINE and bout statistics.
-
-The demo emits a label every PREDICT_EVERY frames -- about six calls a second, per
-fencer. That is the right granularity for an overlay and the wrong one for a human:
-nobody wants 10,288 rows. A timeline collapses that stream into discrete events
-("right fencer lunged at 4:12.3, 0.8 s, 71% confident") and the statistics summarise
-them ("A advanced 34 times, B retreated 41 times").
-
-WHAT MAKES THIS HARDER THAN A GROUP-BY, and why the scoring below exists:
-
-63% of the demo's predictions on bout 4 land OUTSIDE labelled fencing, because a
-broadcast is mostly not fencing -- replays, crowd shots, graphics, between-point
-standing around. The per-window scorer never noticed, since it drops unlabelled time
-before scoring. A timeline cannot drop it: every phantom event becomes a visible row
-claiming something happened. So an event list is only as good as its defence against
-filler, and the cheap "is this fencing?" gate FAILED (36% precision against a 23%
-base rate -- see CLAUDE.md; a replay of a touch is geometrically identical to the
-live touch). This script therefore tests the two defences that remain:
-
-  min duration    a real action sustains across several consecutive windows; a
-                  phantom from a replay cut may not
-  min confidence  mean probability across the event's windows
-
-Both are MEASURED here rather than assumed, because assuming is how this project
-produced seven retractions. `--sweep` prints the full grid.
-
-SCORING (needs a labels file). Every emitted event lands in exactly one bucket:
-
-  matched     overlaps a ground-truth interval of the SAME class for that fencer
-  wrong-class overlaps labelled fencing, but the class is wrong
-  filler      sits in an unlabelled hole >= FILLER_GAP seconds -- a replay, crowd
-              shot or graphic. A real error: the overlay is captioning not-the-bout.
-  in-pause    sits in a SHORT unlabelled hole, i.e. live fencing that was not worth
-              labelling. AMBIGUOUS, so excluded from precision rather than guessed at.
-
-That split exists because Aaron described bout 4's gaps two different ways -- "if
-there is a gap it probably means there's no arm/blade thing" and "the gaps in
-intervals aren't gaps in fencing, it's just that the broadcast has other stuff" --
-and the measured distribution says both are true of different gaps: median hole
-5.3 s, but 32 holes over 15 s carrying 906 of the 1190 gap-seconds. Calling every
-unlabelled call a hallucination overstates the error; calling none of them one
-understates it.
-
-INPUT is the probability cache written by evaluate_labels.py (slot, time, probs),
-not the video -- so tuning the gates costs milliseconds instead of a 90-minute
-re-run. Generate one with:
-
-    py -3 scripts/evaluate_labels.py <video> <labels> --model <ckpt> --tag _held
-
-USE A HELD-OUT CHECKPOINT. models/action_opp.pth trained on all four bouts, so its
-timeline on any of them is circular -- it scores 91.6% on bout 1 against the honest
-held-out 74.6%. The script warns if the cache looks like it came from the shipped
-checkpoint.
-
-usage:
-  py -3 scripts/bout_timeline.py <probs.npz> [labels.csv] [options]
-
-  --min-dur S      drop events shorter than this (default 0.60, tuned on bout 1)
-  --min-conf P     drop events whose mean confidence is below this (default 0.55)
-  --max-gap S      bridge gaps up to this long inside one event (default 0.40)
-  --smooth S       average probabilities over +-S/2 s before segmenting. Default 0
-                   (OFF) because it trades recall for precision and the two labelled
-                   bouts disagree about whether that is worth it:
-                     bout 1 (clean 104 s segment)  prec 63->65->60, strict recall
-                                                   52->44->37 at 0/0.5/0.8 s -- LOSES
-                     bout 4 (26 min broadcast)     prec 38->40->43->47, strict recall
-                                                   36->37->34->32 at 0/0.5/0.8/1.2 s,
-                                                   and count error 158->113 -- WINS
-                   Try 0.5-0.8 on long broadcast footage, leave it off on a clean
-                   bout. Do not generalise from either bout alone; an earlier version
-                   of this line called it a clean null on bout 1 evidence only.
-  --sweep          print the duration x confidence grid instead of a timeline
-  --csv PATH       write the timeline to CSV
-  --quiet-events   include neutral/walking as events (default: they are idle, not
-                   events, and are counted as time rather than listed)
-  --top N          show only the first N timeline rows (default 40, 0 = all)
-  --self-test      segmentation edge cases; no data needed
-"""
+"""Turn the per-window prediction stream into an EVENT TIMELINE and bout statistics."""
 import argparse
 import csv
 import sys
@@ -92,17 +15,8 @@ from src.action_model import CLASS_NAMES
 from src.labels import (labelled_spans, load_intervals, overlap, unlabelled_gaps,
                         UNSCORABLE)
 
-# An unlabelled hole longer than this is treated as broadcast filler; shorter ones
-# are treated as an unlabelled pause DURING live fencing. Not a guess -- bout 4's
-# holes are bimodal, median 5.3 s but with 32 holes over 15 s carrying 906 of the
-# 1190 gap-seconds. See src.labels.unlabelled_gaps for why this distinction exists
-# at all. An event in a short hole is ambiguous, not necessarily wrong.
 FILLER_GAP = 15.0
 
-# Mirrors demo_video.QUIET_CLASSES. Not imported, deliberately: importing demo_video
-# pulls in torch, cv2 and mediapipe for a script that only reads an npz, which turns
-# a 0.2 s run into an 8 s one. The cost of the copy is one constant that has not
-# changed since 2026-07-23; the check below fails loudly if it ever does.
 QUIET_CLASSES = {"neutral", "walking"}
 SLOT_NAME = {"A": "left", "B": "right"}
 # Aggression proxy: forward intent vs yielding ground. Not a claim about who is
@@ -130,16 +44,7 @@ def mmss(t: float) -> str:
 
 
 def smooth_probs(times: np.ndarray, probs: np.ndarray, window: float) -> np.ndarray:
-    """Average each prediction's probabilities with its neighbours within `window` s.
-
-    The raw stream flickers: on held-out bout 1 the median run is 0.33 s (two
-    consecutive windows) against true intervals of 1.2-2.6 s, so single-window blips
-    chop real actions into fragments that the duration gate then deletes.
-
-    Averaging is restricted by TIME, not by index, so it never blends across a gap
-    where the fencer was untracked -- two predictions 40 s apart are not neighbours
-    however adjacent they are in the array.
-    """
+    """Average each prediction's probabilities with its neighbours within `window` s."""
     if window <= 0:
         return probs
     out = np.empty_like(probs)
@@ -152,14 +57,7 @@ def smooth_probs(times: np.ndarray, probs: np.ndarray, window: float) -> np.ndar
 
 def build_events(times: np.ndarray, probs: np.ndarray, slot: str, *,
                  max_gap: float, period: float) -> list[Event]:
-    """Merge a run of same-label predictions into one event. `times` must be sorted.
-
-    A run ends when the label changes OR when the stream goes quiet for longer than
-    max_gap. That second condition matters: the demo emits nothing when a fencer is
-    untracked (no box, or MAX_FROZEN_FRAC tripped), and without it a fencer who
-    walks off screen mid-advance and returns 40 s later produces ONE 40-second
-    "advance" -- the same label, so a naive group-by happily welds them together.
-    """
+    """Merge a run of same-label predictions into one event. `times` must be sorted."""
     if len(times) == 0:
         return []
     assert (np.diff(times) >= 0).all(), "sort the stream before segmenting it"
@@ -187,20 +85,7 @@ def build_events(times: np.ndarray, probs: np.ndarray, slot: str, *,
 
 def classify_event(ev: Event, truth: dict, spans: dict,
                    gaps: dict | None = None) -> str:
-    """matched / wrong-class / unscorable / filler / in-pause.
-
-    The last two are both "no label here", split by how long the unlabelled hole is:
-
-      filler    hole >= FILLER_GAP -- a replay, crowd shot or graphic. A real error;
-                the overlay is captioning something that is not the bout.
-      in-pause  a short hole inside live fencing. AMBIGUOUS, not counted as an error:
-                Aaron labelled where there was blade/footwork to label, so a call
-                here may be a real action he did not mark, or may be noise.
-
-    Reporting these as one "phantom" number, which an earlier version of this script
-    did, overstates the error by counting every short between-action pause as a
-    hallucination.
-    """
+    """matched / wrong-class / unscorable / filler / in-pause."""
     best, best_ov = None, 0.0
     for s, e, lab in truth.get(ev.slot, []):
         ov = overlap((ev.start, ev.end), (s, e))
@@ -228,16 +113,6 @@ def score(events: list[Event], truth: dict, end: float = 0.0) -> dict:
     scorable = sum(v for k, v in buckets.items()
                    if k not in ("unscorable", "in-pause"))
 
-    # Recall over ground-truth action intervals, reported two ways because the
-    # generous one flatters the model and the difference is not small.
-    #
-    #   any     some same-class event touches the interval at all
-    #   strict  same-class events cover at least HALF the interval's duration
-    #
-    # `any` overcredits long events: on held-out bout 1 four events each straddled
-    # two true intervals, so 8 of 23 recall credits came from events that had not
-    # localised anything -- one 9 s "advance" spanning a whole approach sequence
-    # collects a credit for every step inside it.
     found = strict_found = total = 0
     per_class: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])  # any, strict, n
     for slot, rows in truth.items():
@@ -270,14 +145,6 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cache", type=Path)
     ap.add_argument("labels", type=Path, nargs="?")
-    # Defaults chosen on held-out bout 1 (precision 68% at 0.60 vs 63% at 0.40, same
-    # recall) and then checked on held-out bout 4: 38% precision / 36% strict recall,
-    # a reasonable middle of that bout's 21%-73% precision range.
-    #
-    # Duration is the reliable axis on BOTH bouts. Confidence is not: on bout 1 it is
-    # flat (70/70/68/71% across 0->0.65 at min_dur 0.60) while on bout 4 it is the
-    # stronger of the two (32/34/38/42/59%). Raise --min-conf on broadcast footage;
-    # it buys nothing on a clean bout.
     ap.add_argument("--min-dur", type=float, default=0.60)
     ap.add_argument("--min-conf", type=float, default=0.55)
     ap.add_argument("--max-gap", type=float, default=0.40)
@@ -295,10 +162,6 @@ def main() -> int:
               f"  py -3 scripts/evaluate_labels.py <video> <labels> "
               f"--model models/verify_*.pth --tag _held")
         return 1
-    # Warn unless the filename says a held-out checkpoint produced it. Deliberately
-    # an allowlist: a new tag someone invents should trip the warning rather than
-    # slip through, because a circular cache reads as a triumph (91.6% on bout 1
-    # against the honest 74.6%) and nothing downstream can detect it.
     if a.labels and not any(k in a.cache.stem for k in ("held", "verify")):
         print("!! This cache does not look like it came from a HELD-OUT checkpoint.\n"
               "!! models/action_opp.pth trained on every labelled bout, so scoring it\n"
@@ -378,10 +241,6 @@ def main() -> int:
                   f"({fwd / (fwd + back):.0%} forward)")
         print(f"    idle (neutral/walking) {idle:.0f}s")
         if truth:
-            # A count is the headline a viewer reads off this table, and it can be
-            # right for the wrong reasons -- misses and false positives cancel. Show
-            # the true count beside it so the error is visible rather than implied
-            # by a precision figure further down.
             true_counts = Counter(l for _, _, l in truth.get(slot, [])
                                   if l not in QUIET_CLASSES and l not in UNSCORABLE)
             line = "  ".join(f"{c} {counts[c]}/{true_counts[c]}"
@@ -426,13 +285,7 @@ def main() -> int:
 
 
 def sweep(events: list[Event], truth: dict, end: float) -> int:
-    """Does gating on duration and confidence actually buy anything?
-
-    Printed as a grid rather than a single 'best', because the interesting outcome
-    is whether the numbers MOVE. A flat grid means the gate is not discriminating --
-    that is exactly how the geometric fencing gate was caught (precision pinned at
-    34-36% across every threshold).
-    """
+    """Does gating on duration and confidence actually buy anything?"""
     print("=== GATE SWEEP: does filtering remove filler without losing real events? ===")
     print(f"{'min_dur':>8}{'min_conf':>10}{'events':>8}{'prec':>7}{'rec@any':>9}"
           f"{'rec@50%':>9}{'filler':>8}{'filler%':>9}")

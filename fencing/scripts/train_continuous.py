@@ -1,31 +1,4 @@
-"""Train on clips + CONTINUOUS windows, validated leave-one-bout-out.
-
-Every accuracy number in this project so far describes a model trained only on
-hand-cut clips. This is the first training run that sees continuous footage.
-
-Two things are being tested, and they are separable:
-
-  1. DOES CONTINUOUS DATA HELP AT ALL?  clips-only vs clips+continuous, same
-     recipe otherwise.
-  2. CAN THE POST-HOC PRIOR BE RETIRED?  The shipped model uses inverse-frequency
-     class weighting, which drives its effective prior to UNIFORM, and then
-     demo_video multiplies CLASS_PRIOR back in to undo that (19.0% -> 41.9% when
-     it was introduced). Continuous windows arrive at their NATURAL frequencies,
-     so training on them unweighted should give the model a correct prior
-     directly, and the post-hoc correction becomes unnecessary. Both weighting
-     schemes are run so the question is answered rather than assumed.
-
-VALIDATION IS BY BOUT, never by window. Windows are sampled every 5 frames from a
-60-frame span, so neighbours share 92% of their frames -- a random split would put
-near-duplicates on both sides and report a fantasy. Held-out bout = held-out
-match, which is also the question that matters: does this work on footage it has
-never seen?
-
-Evaluation runs on the cached tensors from extract_continuous.py, so it is
-instant. Only extraction is expensive, and that is cached.
-
-usage: py -3 scripts/train_continuous.py [--epochs 80] [--seeds 3]
-"""
+"""Train on clips + CONTINUOUS windows, validated leave-one-bout-out."""
 import argparse
 import sys
 from pathlib import Path
@@ -59,14 +32,7 @@ class TensorWindows(Dataset):
 
 
 def load_bouts(stride=1):
-    """Extracted bouts, optionally subsampled for TRAINING cost.
-
-    Windows are emitted every PREDICT_EVERY=5 frames from a 60-frame span, so
-    neighbours share 92% of their frames. Taking every 3rd still leaves 75%
-    overlap -- almost no information is lost and training cost drops 3x. Applied
-    to training data only; evaluation always uses every window, so the held-out
-    numbers stay comparable to evaluate_labels.
-    """
+    """Extracted bouts, optionally subsampled for TRAINING cost."""
     out = {}
     for p in sorted(CONT_DIR.glob("*.npz")):
         d = np.load(p)
@@ -110,10 +76,6 @@ def train_once(train_ds, weights, epochs, seed, device, pool="mean"):
     return model
 
 
-# Shipped prior, applied to inverse-frequency models exactly as demo_video does.
-# Comparing an inv-freq model RAW against a natural-prior model is not a fair
-# test: inv-freq drives the effective prior to uniform on purpose and the
-# correction is put back at inference. Judge each recipe as it would actually run.
 SHIPPED_PRIOR = np.array([0.184, 0.045, 0.017, 0.122, 0.230, 0.401], dtype=np.float64)
 
 

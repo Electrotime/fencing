@@ -1,26 +1,4 @@
-"""Left-right mirroring as free training data. Invariance PROVEN, not assumed.
-
-The action model never sees pixels -- `_normalize_sequence` hip-centres and
-divides by body height before anything reaches the LSTM -- so the Roboflow-style
-crop/zoom augmentation that helped the blade detector would be normalised away
-here. Mirroring is different: it changes which leg leads, which arm extends and
-which way the fencer faces, none of which normalisation removes.
-
-THE TRAP: `forward` is `world_vel * nose_dir`. Mirror the keypoints and nose_dir
-flips; fail to mirror the motion track and world_vel does not, so every advance
-becomes a retreat. That is the exact direction-inversion bug that cost 11 points
-this morning, and it would be invisible -- the data would just be quietly wrong.
-
-THE CLAIM: under a TRUE mirror (scene and motion together) both terms flip, so
-`forward` is unchanged and every other engineered feature is symmetric too. If
-that holds, the cached `agg` vectors can be reused as-is and only X needs
-mirroring -- which matters, because the motion tracks were never cached.
-
-test_invariance() checks that claim against the real _engineered_features rather
-than trusting the argument. It runs first and aborts on failure.
-
-usage: py -3 scripts/exp_mirror.py [--holdout 1] [--seeds 2]
-"""
+"""Left-right mirroring as free training data. Invariance PROVEN, not assumed."""
 import argparse
 import sys
 from pathlib import Path
@@ -43,11 +21,7 @@ PAIRS = [(1, 4), (2, 5), (3, 6), (7, 8), (9, 10), (11, 12), (13, 14), (15, 16),
 
 
 def mirror_landmarks(kp):
-    """(..., 33, 4) -> mirrored. Negate x AND swap the left/right landmarks.
-
-    Doing only one of the two is worse than doing neither: negating x without
-    swapping gives a fencer whose left leg is on the right side of their body.
-    """
+    """(..., 33, 4) -> mirrored. Negate x AND swap the left/right landmarks."""
     out = kp.copy()
     out[..., 0] = -out[..., 0]
     for a, b in PAIRS:

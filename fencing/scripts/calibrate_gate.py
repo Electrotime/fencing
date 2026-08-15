@@ -1,42 +1,4 @@
-"""Calibrate an "is this live fencing?" gate. Measure the cues, don't guess them.
-
-63% of the demo's predictions on bout 4 (6469 of 10288) land outside labelled
-fencing -- the overlay confidently labels replays, crowd shots and graphics.
-Scoring never noticed, because unlabelled time is excluded from it, but it is
-most of what a viewer actually watches.
-
-GROUND TRUTH, and its one weakness: Aaron confirmed the label gaps are broadcast
-filler rather than skipped fencing ("the gaps in intervals aren't gaps in
-fencing, it's just that the broadcast has other stuff"). So inside-labelled =
-fencing, outside-labelled = filler. That is not perfect -- a stretch of real
-fencing he chose not to label would count as filler here and drag the measured
-separation DOWN, so these numbers are a lower bound on how well the cues work.
-
-Cues, all from person detection alone (no pose, so this is ~10x cheaper than the
-full pipeline and cheap enough to run every frame in the demo):
-
-  n_tall     how many people pass MIN_BOX_H_FRAC. Live fencing has exactly 2;
-             crowd shots have many or none, close-ups have 1.
-  h_ratio    shorter box height / taller. Two fencers on a piste are at similar
-             camera distance; a foreground spectator plus a fencer is not.
-  sep        horizontal gap between box centres, in frame widths. Fencers face
-             each other across a piste; a close-up or a huddle does not.
-  foot_dy    vertical gap between box BOTTOMS. Both fencers stand on the same
-             piste line, so their feet are at a similar height in frame.
-
-Geometry alone caps at 36% precision against a 23% base rate, because a REPLAY of
-a touch is geometrically identical to the live touch -- two fencers, similar size,
-separated. ~47% of filler passes the geometry gate. So two cues aimed at replays
-rather than at "are there fencers":
-
-  box_h      median box height. Replays are usually a tighter shot than the live
-             wide angle, so the fencers fill more of the frame.
-  motion     mean absolute frame difference. Replays run in slow motion, so
-             inter-frame motion is far lower than live play. Confounded by quiet
-             moments in live fencing, which is why it is measured, not assumed.
-
-usage: py -3 scripts/calibrate_gate.py [video.mp4] [labels.csv] [--step 5]
-"""
+"""Calibrate an "is this live fencing?" gate. Measure the cues, don't guess them."""
 import csv
 import sys
 from collections import defaultdict
@@ -151,9 +113,6 @@ def main() -> int:
                 rec = float(keep[y].mean())
                 print(f"{hr:>10.2f}{sp:>8.2f}{dy:>7.2f}{prec:>11.0%}{rec:>9.0%}"
                       f"{keep.mean():>7.0%}")
-                # favour PRECISION: a gate that wrongly suppresses real fencing is
-                # worse than one that lets some filler through, because a missing
-                # label on a real action is the failure a viewer notices
                 score = prec + 0.3 * rec
                 if best is None or score > best[0]:
                     best = (score, hr, sp, dy, prec, rec)

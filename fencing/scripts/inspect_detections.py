@@ -1,26 +1,4 @@
-"""Draw EVERY tall person detection on sampled frames, so the >2-people case can
-be looked at instead of guessed about.
-
-Three attempts to replace the top-2-by-confidence rule all landed at ~35% on bout
-1 against its 45.9%, each time by a different mechanism I predicted and each time
-wrong. The confusion matrix says what actually breaks: 63 of 122 advances get
-called RETREAT. That is a sign flip, not degraded tracking -- net-forward is
-measured relative to the slot's facing direction (A faces right, B faces left), so
-a box in the wrong slot inverts forward and turns every advance into a retreat.
-
-Which means the extra boxes are not reliably a referee standing between the
-fencers. Before rule number four, look at what they are.
-
-Each output frame is annotated with, per box:
-    rank by confidence, confidence, x-centre, height as a fraction of the frame
-and the pair each rule would pick:
-    CONF  = top 2 by confidence          (current behaviour, 45.9%)
-    SEP   = the 2 furthest apart         (tried, 34.1%)
-Frames are chosen from those where the two rules DISAGREE, since those are the
-only ones where the choice matters.
-
-usage: py -3 scripts/inspect_detections.py [video.mp4] [n_frames]
-"""
+"""Draw EVERY tall person detection on sampled frames, so the >2-people case can"""
 import sys
 from pathlib import Path
 

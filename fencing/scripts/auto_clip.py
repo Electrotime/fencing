@@ -1,13 +1,4 @@
-"""Experiment: auto-find action clips in a match video.
-
-Runs pose estimation over a raw video, looks for advance/retreat/lunge/parry
-patterns in how the hips and wrists move, and cuts candidate clips into
-data/clips/auto_test/<action>/. The clips are guesses. Watch them and move
-the good ones into data/clips/<action>/.
-
-Run from project root:  python scripts/auto_clip.py [path/to/video.mp4]
-(no argument = the Errigo vs Favaretto video)
-"""
+"""Experiment: auto-find action clips in a match video."""
 
 from __future__ import annotations
 
@@ -101,7 +92,6 @@ def top_windows(windows: list[tuple[int, int]], score: np.ndarray, n: int) -> li
             picked.append((s, e))
     return picked 
     
-
 
 def extract_raw_kp(video_path: Path, max_frames: int) -> tuple[np.ndarray, float]:
     """Raw (un-normalized) keypoints for the first max_frames frames of the video."""

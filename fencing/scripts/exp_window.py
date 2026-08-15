@@ -1,26 +1,4 @@
-"""Does the LSTM actually need 2 seconds of sequence? Never tested.
-
-WINDOW_LONG = 60 frames has been fixed since the start of the project and has
-never been swept. Two reasons to suspect it is too long: `last` pooling beat
-`mean` by +4-5 pts on every bout, which says the RECENT frames carry the signal;
-and the actions themselves are short (lunge 0.7 s, parry 0.6 s median).
-
-Free to test, because a shorter window is a SUFFIX of a cached one. Windows are
-stored left-aligned -- real frames at 0..n_real-1 in time order, zero padding
-after -- so the newest k frames are `X[i, n_real-k : n_real]`, re-aligned to the
-front of a shorter array.
-
-HONEST LIMITATION, stated because it would otherwise be invisible: `agg` was
-computed over the FULL 60-frame window and cannot be recomputed here (the motion
-tracks were never cached, and two of the six features are raw sums over the
-window). So the shorter arms get a shorter SEQUENCE alongside 2 s of aggregate
-context. This measures "how much sequence does the LSTM need", not "should the
-whole pipeline use a shorter window". A win here would justify the expensive
-re-extraction needed to answer the bigger question; a null result closes it
-cheaply.
-
-usage: py -3 scripts/exp_window.py [--holdout 1] [--lengths 15,25,35,45,60]
-"""
+"""Does the LSTM actually need 2 seconds of sequence? Never tested."""
 import argparse
 import sys
 from pathlib import Path
@@ -37,11 +15,7 @@ from train_continuous import (TensorWindows, clip_dataset_arrays, evaluate,
 
 
 def tail(X, lengths, k):
-    """Newest k real frames, re-aligned to the front, zero-padded to k.
-
-    Not X[:, :k] -- that would take the OLDEST frames and quietly test the
-    opposite hypothesis, while looking perfectly reasonable.
-    """
+    """Newest k real frames, re-aligned to the front, zero-padded to k."""
     n = len(X)
     out = np.zeros((n, k, X.shape[2]), dtype=X.dtype)
     new_len = np.minimum(lengths, k).astype(np.int64)

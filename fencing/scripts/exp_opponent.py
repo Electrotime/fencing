@@ -1,24 +1,4 @@
-"""Give each fencer the OPPONENT's state as input. Fencing is interactive.
-
-Right now slot A's window never sees slot B. Every prediction is made as if the
-fencer were alone on the piste. But the labels say the two are coupled: advance
-and retreat arrive as opposing pairs almost always, and 34 of 46 parries happen
-during a retreat -- because the opponent is attacking. The model is being asked to
-recognise a RESPONSE without seeing the STIMULUS.
-
-Cheap to test because extraction cached `time` and `slot`: each window can be
-paired with the opponent's window at the same timestamp and their 6 engineered
-features appended, giving 6 own + 6 opponent + 1 presence flag = 13.
-
-THE PRESENCE FLAG IS NOT DECORATION. Clip windows have no opponent (the clip
-corpus is single-fencer keypoint files), so their opponent block is zeros. Without
-a flag, "all-zero opponent" is perfectly correlated with "this came from a clip",
-and the model can use it as a shortcut to identify the data source rather than
-the action. The flag at least makes the zeros explicit; the clean check is the
-`continuous only` arm below, which has no clips at all and so cannot cheat.
-
-usage: py -3 scripts/exp_opponent.py [--holdout 1] [--seeds 2]
-"""
+"""Give each fencer the OPPONENT's state as input. Fencing is interactive."""
 import argparse
 import sys
 from pathlib import Path

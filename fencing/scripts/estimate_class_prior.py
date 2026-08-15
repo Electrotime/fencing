@@ -1,24 +1,4 @@
-"""Fix `lunge` over-prediction by correcting the class prior. Honestly split.
-
-Diagnosis: the clip corpus over-represents the exciting classes (lunge 10% and
-parry 10% of training windows vs 2.6% and 1.0% of real footage), and then
-inverse-frequency class weighting pushes the model's effective prior all the way
-to UNIFORM. So it expects lunge ~6x more often than it happens, and lunge becomes
-a default that absorbs advance (122 of 151), walking (155) and neutral (70).
-
-Standard label-shift correction: divide by the prior the model was trained toward
-and multiply by the prior that actually holds.
-
-    p_corrected(c|x)  ∝  p(c|x) * target_prior(c) / train_prior(c)
-
-FITTING THE PRIOR ON THE TEST LABELS WOULD BE CHEATING, so the labelled 104 s is
-split by TIME: the prior is estimated on the first half and scored on the second,
-and then the halves are swapped. Both directions are reported -- if they disagree
-sharply the correction is just fitting noise.
-
-Also reports an EM-estimated prior (Saerens-Latinne-Decaestecker), which needs no
-labels at all and so could be used on unlabelled footage in production.
-"""
+"""Fix `lunge` over-prediction by correcting the class prior. Honestly split."""
 import csv
 import sys
 from collections import Counter, defaultdict

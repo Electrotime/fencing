@@ -1,28 +1,4 @@
-"""Validate an interval-label CSV before it gets used for training or scoring.
-
-Written so Aaron can check a label file WHILE writing it, rather than finding a
-typo after the whole bout is done. Accepts both schemas:
-
-  single-track (bout1/bout2):  fencer,start,end,label
-  two-track    (new):          fencer,start,end,footwork,blade
-
-The two-track schema exists because the classes were never mutually exclusive --
-a fencer parries WHILE retreating, which is why `parry` competed with `retreat`
-for one slot and lost every time. Footwork and blade are separate questions and
-get separate columns.
-
-Checks, in rough order of how much damage each mistake causes:
-  1. unknown class names (a typo silently becomes a class nobody trains on)
-  2. start >= end, or negative times
-  3. OVERLAPPING intervals for the same fencer -- truth_at() takes the first
-     match, so an overlap means some windows are scored against a label you
-     didn't intend
-  4. intervals past the end of the video (only if the video is present)
-  5. left/right coverage imbalance, reported not errored -- deliberate gaps are
-     normal and excluded from scoring
-
-usage: py -3 scripts/check_labels.py data/labels/bout3_intervals.csv [video.mp4]
-"""
+"""Validate an interval-label CSV before it gets used for training or scoring."""
 import csv
 import sys
 from collections import defaultdict
@@ -32,15 +8,6 @@ PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 from src.action_model import CLASS_NAMES
 
-# `extension` is not a predictable class (it was dropped and lives on as the
-# arm-reach FEATURE) but it is a legal thing to WRITE DOWN -- the scorer counts
-# and excludes it. Same idea for `none` in the blade column.
-#
-# In the TWO-TRACK schema `parry` is a blade value only -- allowing it as footwork
-# too would rebuild the exact collision the split exists to remove: a fencer
-# parrying while retreating needs both cells filled, not a choice between them.
-# In the SINGLE-track schema `parry` is of course a legal label; that is the whole
-# problem being migrated away from, not a typo to reject.
 SINGLE_OK = set(CLASS_NAMES) | {"extension"}
 FOOTWORK_OK = set(CLASS_NAMES) - {"parry"}
 BLADE_OK = {"parry", "extension", "none", "attack", "beat"}

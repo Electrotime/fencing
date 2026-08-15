@@ -1,90 +1,4 @@
-"""Which engineered features survive a change of VENUE, and why the answer is camera work.
-
-`advance` -> `walking` is the largest single error in the project: 282 of bout 5's 869
-true advances. The standing explanation in CLAUDE.md was the CROUCH feature -- knee angle
-~140 deg fencing vs ~164 upright -- on the theory that a different camera height shifts
-exactly that measurement, making it "one feature deep". That explanation is WRONG, and
-the cached windows say so without needing any video:
-
-    ADVANCE vs WALKING, AUC per feature      bout1  bout2  bout3  bout4  bout5
-      net_forward   (motion)                  0.73   0.69   0.78   0.73   0.62
-      stance_p90    (posture)                 0.82   0.84   0.85   0.82   0.74
-      total_travel  (motion)                  0.49   0.56   0.63   0.63   0.34  <- INVERTS
-      crouch        (posture)                 0.92   0.87   0.95   0.86   0.79  <- holds
-
-Crouch is bout 5's BEST feature, and its knee-angle gap (18.7 deg) matches bout 4's
-(17.2 deg) almost exactly. What collapses is the pair of MOTION features, and
-total_travel does not merely weaken, it INVERTS: at bout 5 the median walking window
-travels 2.46 against advance's 1.57, the reverse of every other bout.
-
-Posture features are hip-centred and torso-normalised in pose_pipeline, so they are
-scale-free and a camera-height change barely touches them. The motion features are not:
-
-    world_vel = diff(hip_x) - pan / PAN_WIDTH
-
-Both terms are frame-relative, and the pan correction is an ESTIMATE. So this script
-measures the estimate itself. If bout 5's camera pans differently -- more, or more often
-while the fencers are merely walking between touches -- then walking acquires apparent
-world motion, advance loses its distinctiveness, and total_travel inverts. That is the
-same failure that killed the fencing gate, whose best cue inverted between venues
-because "the cue measures camera work".
-
-Cheap on purpose: phase correlation on 320x180 grayscale, no pose and no YOLO, reusing
-demo_video._frame_pan so this measures the SAME estimator the features are built on
-rather than a lookalike.
-
-RESULT. Venue B's camera pans 1.7x harder than bout 4's (median |pan| 0.664 vs 0.394)
-and is still only 16% of the time against 28%. But the aggregate adv/walk RATIO printed
-below is NOT the explanation -- it does not line up with the AUCs (bout 1 is 1.00 at
-total_travel AUC 0.49, bout 5 is 1.60 at 0.34). The per-window causal test at the bottom
-is the one that lands, and it replicates at both venues:
-
-    true-advance windows      called correctly      called walking       AUC
-      bout 5 (venue B)        n=348, med 0.843      n=282, med 1.310     0.63
-      bout 4 (venue A)        n=551, med 1.453      n= 27, med 2.075     0.79
-
-Camera pan is the mechanism; the venue only sets how often it bites (32% of bout 5's true
-advances go wrong against 3.6% of bout 4's).
-
-ONE MECHANISM RULED OUT, recorded so nobody re-runs it. `_frame_pan` returns a silent 0.0
-when both strips fall below PAN_MIN_RESPONSE -- asserting "camera still" exactly when it
-cannot tell, which would produce this error precisely: fencer advances, camera follows,
-diff(hip_x)~0, pan wrongly 0, world_vel~0, reads as walking. Measured on bout 5 the
-fallback fires on 0.2% of frames and 0.0% of both the correct and the wrong windows.
-
-MOTION BLUR ALSO RULED OUT. If blur were degrading the pose during fast pans, pose
-quality would fall as pan rises. It does not: mean landmark visibility and frozen-joint
-fraction both separate high-pan from low-pan windows at AUC 0.51. On the windows that
-actually go wrong the pose is if anything CLEANER than on the correct ones (visibility
-0.925 vs 0.905, frozen 0.003 vs 0.008) while |pan| separates them at 0.64. The skeleton
-is fine; the PAN TERM is what is wrong.
-
-WHICH LEAVES THE ESTIMATOR, and `--estimators` shows how it fails. _frame_pan reads two
-narrow border strips (PAN_STRIP_FRAC = 0.22, ~70 px of a 320 px frame). Edges are where
-background lives -- but they are also where content ENTERS AND LEAVES during a pan, so
-the two strips stop being a pure shift of one another, which is precisely what phase
-correlation assumes. Measured on bout 5 against a full-frame correlation over the same
-row band:
-
-    frames in the top N% of full-frame motion      strips report    sign disagrees
-      top 10%   (n=1730)                             47% of full        18.6%
-      top  5%   (n= 865)                             38% of full        19.3%
-      top  1%   (n= 173)                             23% of full        20.8%
-
-Overall correlation between the two estimators is 0.304. Widening the strips 2x moves
-the estimate toward the full-frame one, which is the direction expected if the narrow
-aperture is the deficient part. Note neither is declared ground truth -- the full-frame
-estimate can be pulled by the fencers themselves -- but they disagree by 2-4x exactly on
-the frames the feature depends on, and one of them is badly wrong.
-
-FIXING IT REQUIRES RE-EXTRACTION AND RETRAINING. The cached windows store normalised
-keypoints but not the per-frame hip_x, so `forward` and `total_travel` cannot be
-recomputed offline; changing the pan estimator changes two of the six engineered
-features, which changes the model's inputs.
-
-usage: py -3 scripts/venue_motion.py [--bouts 1,4,5] [--stride 1]
-       py -3 scripts/venue_motion.py --estimators 5     # strips vs full-frame vs wide
-"""
+"""Which engineered features survive a change of VENUE, and why the answer is camera work."""
 import argparse
 import sys
 from pathlib import Path
@@ -247,10 +161,6 @@ def main() -> int:
     print("is 1.60 at 0.34), so it does not on its own explain the inversion. The direct")
     print("test is below: does the camera moving harder actually make the model wrong?")
 
-    # ---- the causal test ----------------------------------------------------
-    # Aggregate pan is circumstantial. What matters is whether the windows the model
-    # gets WRONG are the ones the camera was moving through. Joined per window against
-    # a held-out probability cache, so this is the model's real behaviour, not a proxy.
     for stem, cache in (("5", "5_probs_held.npz"), ("4", "4_probs_heldb5.npz")):
         if stem not in rows or not (LAB / cache).exists():
             continue

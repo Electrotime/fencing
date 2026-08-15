@@ -1,43 +1,4 @@
-"""Can opponent context RAISE parry recall, not just cut false parries?
-
-The shipped gate is one-directional. `_apply_parry_gate` only ever deletes: if the
-model called parry and the opponent is not lunging, demote to the footwork runner-up.
-It lifted precision 29% -> 55% on held-out bout 4 and cost recall 19% -> 17%, because
-deleting is all it can do. Parry recall is therefore capped by how often parry wins
-the argmax outright, no matter how obvious the context.
-
-The co-occurrence Aaron pointed out ("lunge and parry are usually together") is
-symmetric, and only half of it is being used. 76% of labelled parries have the
-opponent lunging. So the untried direction: when parry LOST the argmax but sits at a
-decent probability AND the opponent is unmistakably attacking, promote it.
-
-    veto      argmax == parry  and  opp lunge <  T   ->  demote   (shipped)
-    PROMOTE   argmax != parry  and  own parry >= P
-                                and  opp lunge >= Q  ->  promote  (this script)
-
-THE CONTROL THAT DECIDES THIS. Promoting on `own parry >= P` alone would also raise
-recall -- it is just a lower decision threshold, and any lower threshold buys recall
-with precision. So every promoter is scored against an OWN-ONLY control matched on
-the NUMBER OF PROMOTIONS: take the same count of windows, ranked by own parry
-probability, ignoring the opponent entirely. Same recall budget spent, same class,
-opponent context the only difference. If the opponent-conditioned promoter does not
-beat that, the opponent adds nothing and this closes as a negative -- exactly how the
-shuffled-feature control closed blade energy.
-
-PRE-REGISTERED, so it cannot be revised after seeing the table:
-  * tune on bout 5, confirm on bout 4. Two venues, two different held-out models.
-  * criterion = parry F1 on the tuning bout.
-  * VETO: overall accuracy must not fall on the tuning bout. Parry is ~2% of windows;
-    a rule that trades a point of overall accuracy for parry recall is a bad trade and
-    the project has already rejected bigger gains than that on noise grounds.
-  * the winner must beat its matched own-only control, or it closes as a negative.
-
-Held-out caches only -- a cache from a model trained on the bout it is scored on is
-circular. 4_probs_gate.npz is action_opp5 on bout 4 (in training) and is NOT usable
-here; it exists only for the gate's label-invariance check.
-
-usage: py -3 scripts/sweep_parry_promote.py [--tune 5] [--confirm 4] [--self-test]
-"""
+"""Can opponent context RAISE parry recall, not just cut false parries?"""
 import argparse
 import sys
 from pathlib import Path
@@ -66,13 +27,7 @@ PARRY_OPP_LUNGE_MIN = 0.20
 
 
 def load(stem):
-    """Scorable windows for one bout: probs, opponent probs, truth label.
-
-    Slots are paired by exact time, which is safe because both are predicted on the
-    same frame index at the same fps -- the demo's gate relies on the same thing.
-    A window whose opponent has no distribution gets opp lunge 0.0, matching
-    _apply_parry_gate's conservative reading of "nobody visible to parry".
-    """
+    """Scorable windows for one bout: probs, opponent probs, truth label."""
     cache, csv_name, provenance = HELDOUT[stem]
     d = np.load(LAB / cache)
     slot, time, probs = d["slot"].astype(str), d["time"], d["probs"]
@@ -105,11 +60,7 @@ def load(stem):
 
 
 def decide(probs, opp_lunge, promote_min=None, opp_min=None, own_only=False):
-    """Predicted label per window: argmax -> shipped veto -> optional promoter.
-
-    own_only ignores opp_lunge in the PROMOTER (the veto is untouched) -- that is the
-    matched control, not a shipping candidate.
-    """
+    """Predicted label per window: argmax -> shipped veto -> optional promoter."""
     pred_i = probs.argmax(axis=1)
 
     # --- shipped veto: an argmax parry needs an attacking opponent ---
@@ -119,14 +70,6 @@ def decide(probs, opp_lunge, promote_min=None, opp_min=None, own_only=False):
     demote = (pred_i == PARRY_I) & (opp_lunge < PARRY_OPP_LUNGE_MIN)
     pred_i = np.where(demote, runner_up, pred_i)
 
-    # --- promoter: parry lost the argmax but the context says otherwise ---
-    # Eligibility is `argmax != parry`, NOT `pred != parry`. A window the veto just
-    # demoted must stay demoted: the veto's whole job is deleting parries whose
-    # opponent is not attacking, and re-promoting them would hand back the precision
-    # it bought. The opponent-conditioned rule cannot rescue one anyway (the veto
-    # fires below 0.20 and the promoter demands >= 0.30), but the own-only CONTROL
-    # would -- and then the control would be spending its budget on a different
-    # population, which is not a matched comparison. Same eligible set for both.
     if promote_min is not None:
         cond = (probs.argmax(axis=1) != PARRY_I) & (probs[:, PARRY_I] >= promote_min)
         if not own_only:
@@ -148,12 +91,7 @@ def score(pred, y):
 
 
 def control_for(bout, n_promotions):
-    """Own-only promoter matched on the NUMBER of promotions, not the threshold.
-
-    Ranks the non-parry windows by own parry probability and takes the same count, so
-    the control spends an identical recall budget. Returns None if there is nothing to
-    match (no promotions to compare against).
-    """
+    """Own-only promoter matched on the NUMBER of promotions, not the threshold."""
     if n_promotions <= 0:
         return None
     base = decide(bout["probs"], bout["opp_lunge"])
@@ -194,9 +132,6 @@ def _self_test():
     # would cancel and the gate's 55% precision would silently revert
     assert got[1] == "retreat", "veto must win over the promoter"
 
-    # ...and that holds for the own-only control too, which is the case that would
-    # otherwise quietly undo the veto and make the comparison unmatched. Row 1 has
-    # parry 0.6 (well over promote_min) and was vetoed: it must STAY retreat.
     own = decide(P, opp, promote_min=0.25, opp_min=0.5, own_only=True)
     assert list(own) == ["parry", "retreat", "parry", "parry"], list(own)
 

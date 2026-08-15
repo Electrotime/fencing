@@ -1,35 +1,4 @@
-"""Measure blade MOTION instead of detecting the blade. Dumps a per-frame cache.
-
-Why not just fix the detector: on real footage a fast blade is either motion-blur
-or absent from the frame entirely, so `fencing_blade_v2` fires on 1-2% of frames
-during parry/lunge versus 26-28% during advance/neutral. That is not a training
-bug that more labels fix -- there is nothing sharp in those pixels to detect.
-
-The inversion: blur is what breaks a detector and is exactly what a frame-
-difference measure wants. A blade that smears leaves high difference energy along
-its path; a blade that vanishes between frames left even more. Only a STILL blade
-reads as zero, which is the distinction we actually care about.
-
-So per frame, per fencer, this measures mean |frame difference| inside a box
-projected out along the forearm, where the blade must be. Three guards against
-fooling ourselves, because every previous metric here failed by measuring
-something other than fencing:
-
-  1. CAMERA PAN is removed first. Broadcast footage pans constantly and an
-     uncompensated pan puts large difference energy everywhere. Reuses
-     demo_video._frame_pan -- a previous diagnostic stubbed pan to zero and came
-     out 3x wrong.
-  2. A TORSO control box of IDENTICAL AREA is measured alongside. If blade energy
-     rises only when the whole fencer moves, the ratio stays flat and the feature
-     is worthless. Absolute energy alone would not reveal that.
-  3. GLOBAL frame energy is recorded too, so exposure changes, cuts and crowd
-     motion can be divided out.
-
-Outputs data/labels/<stem>_blade.npz with one row per (frame, slot). Analysis
-lives in analyze_blade_energy.py so it can be re-run without redoing the video.
-
-usage: py -3 scripts/blade_energy.py [video.mp4]
-"""
+"""Measure blade MOTION instead of detecting the blade. Dumps a per-frame cache."""
 import sys
 from pathlib import Path
 
@@ -54,22 +23,6 @@ SCALE = 0.5              # work at half resolution: 4x less differencing, same s
 BLADE_REACH = 3.0        # blade extends ~3x forearm length past the hand
 BLADE_HALFWIDTH = 0.9    # box half-width, in forearm lengths
 
-# ---- v2 measurement (2026-08-13) -------------------------------------------
-# The v1 numbers were chance (pooled parry AUC 0.55-0.59 over SIX parries). Two
-# specific flaws were named at the time and never tested; both are fixed here, and
-# BOTH measurements are written to the same cache so they are compared on identical
-# frames rather than across runs.
-#
-#   flaw 1  the box is AXIS-ALIGNED. blade_box projects along the forearm and then
-#           takes the enclosing rectangle, so a diagonal blade -- the common case --
-#           sits as a thin line inside a large rectangle of background. Fixed by
-#           sampling an ORIENTED strip along the blade direction.
-#   flaw 2  pan compensation is one GLOBAL horizontal shift estimated at 320x180.
-#           No vertical, no zoom, and it cannot cancel parallax because the fencers
-#           are at a different depth from the background. Worse conceptually: the
-#           question is whether the BLADE moved, and a lunging fencer's whole body
-#           translates, filling their box with energy. Fixed by aligning on that
-#           fencer's OWN TORSO, so what is left is blade motion relative to them.
 STRIP_LEN = 64           # samples along the blade; output is tiny so warping is cheap
 STRIP_WID = 16           # samples across it
 STRIP_HALFWIDTH = 0.45   # HALF of v1's 0.9 -- a blade is thin, and the oriented
@@ -79,12 +32,7 @@ MIN_SHIFT_RESPONSE = 0.05  # below this phase correlation is noise; fall back to
 
 
 def blade_box(kp, W, H, opponent_x):
-    """Axis-aligned box covering where the weapon blade must be, in pixels.
-
-    The weapon hand is whichever wrist is nearer the OPPONENT, not a fixed side.
-    That way it works for lefties and for left/right-handed pairs without needing
-    handedness as an input -- in en garde the weapon arm always leads.
-    """
+    """Axis-aligned box covering where the weapon blade must be, in pixels."""
     got = weapon_arm(kp, opponent_x)
     if got is None:
         return None
@@ -105,11 +53,7 @@ def blade_box(kp, W, H, opponent_x):
 
 
 def weapon_arm(kp, opponent_x):
-    """(elbow, wrist) of the hand nearer the OPPONENT, or None.
-
-    Factored out of blade_box so the v1 box and the v2 strip cannot disagree about
-    which arm holds the weapon -- that would make their comparison meaningless.
-    """
+    """(elbow, wrist) of the hand nearer the OPPONENT, or None."""
     cands = []
     for elbow, wrist in ((L_ELBOW, L_WRIST), (R_ELBOW, R_WRIST)):
         if kp[elbow, 3] < VISIBILITY_THRESHOLD or kp[wrist, 3] < VISIBILITY_THRESHOLD:
@@ -137,12 +81,7 @@ def wrist_dir(kp, W, H, opponent_x):
 
 
 def _strip_M(px, py, ux, uy, length, halfwidth, out_w, out_h):
-    """dst(i,j) -> src(x,y) for an oriented strip, for warpAffine WARP_INVERSE_MAP.
-
-    i runs ALONG the blade from the wrist outward, j runs ACROSS it. Because
-    warpAffine costs output pixels rather than input pixels, sampling a 64x16 strip
-    out of a 953x540 frame is essentially free -- far cheaper than rotating the frame.
-    """
+    """dst(i,j) -> src(x,y) for an oriented strip, for warpAffine WARP_INVERSE_MAP."""
     nx, ny = -uy, ux                      # unit normal to the blade
     sx = length / out_w
     sy = 2.0 * halfwidth / out_h
@@ -154,12 +93,7 @@ def _strip_M(px, py, ux, uy, length, halfwidth, out_w, out_h):
 
 
 def strip_energy(prev, cur, M, shift, out_w, out_h):
-    """|cur - prev| inside an oriented strip, with `prev` shifted to cancel body motion.
-
-    Sampling BOTH frames through the same strip transform and differencing the two
-    small patches is what makes the motion compensation local: the shift only has to
-    be right for this fencer, not for the whole frame.
-    """
+    """|cur - prev| inside an oriented strip, with `prev` shifted to cancel body motion."""
     a = cv2.warpAffine(cur, M, (out_w, out_h),
                        flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                        borderMode=cv2.BORDER_REPLICATE)
@@ -174,12 +108,7 @@ def strip_energy(prev, cur, M, shift, out_w, out_h):
 
 
 def body_shift(prev, cur, cx, cy, half, cache):
-    """(dx, dy) aligning this fencer's torso between frames, plus the response.
-
-    phaseCorrelate(prev, cur) returns the shift d with cur(p) ~= prev(p - d), which
-    is the convention strip_energy expects. Returns None when the patch is too small
-    or the correlation is weak, so the caller can fall back rather than trust noise.
-    """
+    """(dx, dy) aligning this fencer's torso between frames, plus the response."""
     h, w = cur.shape
     x1, y1 = int(max(0, cx - half)), int(max(0, cy - half))
     x2, y2 = int(min(w, cx + half)), int(min(h, cy + half))
@@ -197,20 +126,7 @@ def body_shift(prev, cur, cx, cy, half, cache):
 
 
 def mean_energy(diff, box):
-    """Difference statistics inside a box: (mean, p99, area).
-
-    p99 exists because of an argument that sounded good and did not survive: a
-    blade is a THIN streak inside a box ~3x forearm long, so its blur moves a few
-    percent of pixels hard and barely shifts the box average -- p99 should see
-    what the mean cannot. On bout 2 it looked right (parry AUC 0.70 vs the mean's
-    0.62). On bout 1 it gave 0.49, and POOLED over both it is 0.55 versus the
-    mean's 0.59.
-
-    So: neither statistic separates parry from non-blade, and the mechanism above
-    was reasoning retrofitted to four intervals. Both are kept because they cost
-    nothing to compute and the question is unsettled at n=6 parries -- not because
-    either is known to work. See CLAUDE.md.
-    """
+    """Difference statistics inside a box: (mean, p99, area)."""
     h, w = diff.shape
     x1, y1, x2, y2 = box
     x1, y1 = max(0, int(x1)), max(0, int(y1))
@@ -222,11 +138,7 @@ def mean_energy(diff, box):
 
 
 def _self_test() -> int:
-    """Geometry checks on synthetic frames. Run before spending hours of video on it.
-
-    Both v1 flaws are things that would produce a plausible-looking null result if
-    they were still present, so they are asserted rather than assumed.
-    """
+    """Geometry checks on synthetic frames. Run before spending hours of video on it."""
     H = W = 200
 
     def line_frame(off):
@@ -299,9 +211,6 @@ def main() -> int:
             warped = cv2.warpAffine(prev_gray, M, (W2, H2), borderMode=cv2.BORDER_REPLICATE)
             diff = np.abs(gray - warped)
             global_e = float(diff.mean())
-        # `prev_gray` is reassigned below, so hold the actual previous frame for the
-        # per-fencer v2 pass -- differencing a frame against itself reads as zero
-        # motion everywhere, which would look like a clean null result.
         prev_frame = prev_gray
         prev_gray = gray
 
@@ -375,9 +284,6 @@ def main() -> int:
                                      STRIP_HALFWIDTH * flen, STRIP_LEN, STRIP_WID)
                         s_e, s_p99 = strip_energy(prev_frame, gray, M, shift,
                                                   STRIP_LEN, STRIP_WID)
-                        # control strip: same size and same shift, laid across the
-                        # TORSO instead of the blade. Body motion that survives the
-                        # alignment shows up here too, so the ratio stays honest.
                         Mc = _strip_M(hx, hy, ux, uy, BLADE_REACH * flen * 0.5,
                                       STRIP_HALFWIDTH * flen, STRIP_LEN, STRIP_WID)
                         c_e, c_p99 = strip_energy(prev_frame, gray, Mc, shift,

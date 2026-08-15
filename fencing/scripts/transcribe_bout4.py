@@ -1,19 +1,10 @@
-"""Transcribe Aaron's bout 4 table -> two-track CSV. Anomalies FLAGGED, not fixed.
-
-Fields per row: (time_string, A_footwork, A_blade, B_footwork, B_blade).
-Empty string = the cell was blank in the source table.
-"""
+"""Transcribe Aaron's bout 4 table -> two-track CSV. Anomalies FLAGGED, not fixed."""
 import sys
 from pathlib import Path
 
 PROJECT = Path(r"c:\Users\aaron\OneDrive\Documents\GitHub\fencing\fencing")
 OUT = PROJECT / "data" / "labels" / "bout4_intervals_2track.csv"
 
-# Two timestamps in the source are malformed. Both are transcribed with the
-# obvious reading and REPORTED below rather than quietly corrected -- if either
-# guess is wrong the interval lands in the wrong place and nothing would catch it.
-#   "20.53.520"  -> 20:53.520  (periods for colons; gives a 2.06 s walk)
-#   "22:118.967" -> 22:18.967  (extra digit; gives a 1.10 s lunge, the right size)
 FIXED = {"20.53.520": "20:53.520", "22:118.967": "22:18.967"}
 
 R = [
@@ -200,14 +191,6 @@ def main():
             rows.append((who, s, e, FW[fw], BL[bl]))
 
     rows.sort(key=lambda r: (r[0], r[1]))
-    # Overlaps matter: truth_at() returns the FIRST interval containing t, so an
-    # overlap silently scores windows against a label that was not intended.
-    #
-    # All of these are 0.01-0.14 s -- transcription slips where one interval starts
-    # a few hundredths before the previous ends, not genuine disagreements about
-    # what happened. Clamped by truncating the EARLIER interval, and every clamp is
-    # printed. A clamp of this size cannot move a label onto the wrong action; the
-    # shortest real interval in this bout is 0.30 s.
     MAX_CLAMP = 0.20
     fixed = []
     for who in ("left", "right"):

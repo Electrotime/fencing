@@ -1,11 +1,4 @@
-"""Phase 4: LSTM that watches a keypoint sequence and names the fencing action.
-
-Hybrid design (measured, 2026-07): the LSTM reads the raw keypoint sequence, and
-four engineered clip-level numbers go straight into the classifier head. Those
-four carry signals the LSTM provably couldn't dig out of 132 channels with a
-dataset this size -- adding them took validation accuracy from ~51% to ~74% and
-retreat recall from ~3% to ~67% in 10-seed ablations.
-"""
+"""Phase 4: LSTM that watches a keypoint sequence and names the fencing action."""
 
 from __future__ import annotations
 
@@ -20,11 +13,6 @@ CLASS_NAMES = ["advance", "lunge", "parry", "retreat", "neutral", "walking"]
 SEQ_LEN = 60          # every clip gets padded/trimmed to this many frames
 INPUT_SIZE = 132      # 33 landmarks x 4 values, flattened per frame
 N_AGG_FEATURES = 6    # engineered clip-level features fed straight into the head
-# With opponent context: 6 own + 6 opponent + 1 presence flag. Fencing is
-# interactive -- advance/retreat come in opposing pairs and 34 of 46 labelled
-# parries happen during a retreat because the opponent is attacking -- but every
-# model before 2026-08-09 classified each fencer in isolation. Measured +2.9 pts
-# mean over three held-out bouts (67.4 -> 70.3).
 N_AGG_WIDE = 2 * N_AGG_FEATURES + 1
 HIDDEN_SIZE = 128     # re-tuned at 488 windows (h64 won at 83 samples; capacity pays
                       # off again with 6x the data: +1.5 pts, lunge ~100%)
@@ -33,10 +21,6 @@ DROPOUT = 0.3
 WEIGHT_DECAY = 1e-4
 MIN_RECALL = 0.70     # below this, a class needs more training clips
 
-# sustained/homogeneous classes: a long clip is many valid windows, so slice it
-# into overlapping SEQ_LEN chunks instead of using only the first 2 s. Transient
-# actions (lunge/parry/advance/retreat) stay one-clip-one-sample -- slicing them
-# would make windows that miss the action's one defining moment.
 SLICEABLE_CLASSES = {"neutral", "walking"}
 SLICE_STRIDE = 30     # 1 s hop between windows
 MIN_SLICE = 20        # don't emit a window with fewer real frames than this
@@ -58,44 +42,7 @@ def _knee_angle(hip: np.ndarray, knee: np.ndarray, ankle: np.ndarray) -> np.ndar
 
 
 def _first_mover(kp: np.ndarray, nose_dir: float) -> float:
-    """NOT WIRED IN -- kept as a documented dead end. See the warning at the end.
-
-    +1 if the FRONT ankle starts moving first, -1 if the back one does, 0 if tied.
-
-    Aaron's cue, from fencing rather than from the data: an advance leads with the
-    front leg and the back leg follows; a retreat is the mirror. That is a
-    direction signal built from ankle TIMING, so unlike net-forward it does not
-    care about hip drift or camera pan -- which is what made a fencer rocking
-    backward through a stoppage read as `retreat`.
-
-    Only the FIRST movement counts. A cross-correlation over the whole clip scored
-    worse (advance recall 75% vs 88%) and came out sign-inverted, because several
-    clips start mid-advance and the dominant lag then captures the back leg
-    finishing the PREVIOUS step. Looking only at who moves first is immune to
-    where the clip was cut.
-
-    Measured over 8 seeds on held-out clips: advance recall 70% -> 88% and
-    advance<->retreat confusions 2/80 -> 0/80, for a small cost to retreat
-    (82% -> 77%). Adding it alongside the cross-correlation version was worse than
-    this alone (78%), so only this one was used.
-
-    THEN IT FAILED ON VIDEO, and the reason is the point of keeping this here.
-    Shipped, retrained and rendered: `advance` collapsed to 5 calls per fencer,
-    down from 64. The feature asks who moved first IN THE WINDOW. Training clips
-    are cut at the action's start, so that is the fencer initiating the action.
-    A sliding window over continuous video starts wherever it lands -- mid-stride
-    -- so the same question returns noise:
-
-        training advance clips   front 26% / back 17%   (real lean)
-        training retreat clips   front  9% / back 36%   (strong lean)
-        bout sliding windows     front 26% / back 24%   (coin flip)
-
-    So the 70% -> 88% gain was measuring a property of HOW THE CLIPS WERE CUT, not
-    a property of fencing. Same family of bug as the zero-padding artifact. The
-    biomechanics are sound; the implementation is not window-position invariant.
-    To revive it, detect stance-widening EVENTS inside the window and check leg
-    order at each event, rather than trusting the window's first frame.
-    """
+    """NOT WIRED IN -- kept as a documented dead end. See the warning at the end."""
     if len(kp) < 6:
         return 0.0
     ax = kp[:, ANKLE_LEFT, 0] * nose_dir
@@ -126,18 +73,7 @@ FORWARD_SCALE = 10.0  # lifts fraction-of-width motion into a ~[-3, 3] feature r
 
 
 def wide_agg(own: np.ndarray, opponent: np.ndarray | None) -> np.ndarray:
-    """[own(6) | opponent(6) | present(1)] -- the ONLY definition of this layout.
-
-    Training (train_shipping), offline scoring (evaluate_labels) and the live demo
-    must all build this identically or the model is served inputs it never saw.
-    Every trustworthy measurement in this project rests on that agreement, so the
-    construction lives here rather than being repeated three times.
-
-    `opponent=None` means the other fencer was not usable for this window -- not
-    detected, or its window failed the frozen/too-short gates. The block is zeroed
-    and the flag drops to 0, so "no opponent" is a state the model can learn
-    rather than a silent lie about a stationary opponent.
-    """
+    """[own(6) | opponent(6) | present(1)] -- the ONLY definition of this layout."""
     own = np.asarray(own, dtype=np.float32).reshape(-1)
     if opponent is None:
         return np.concatenate([own, np.zeros(N_AGG_FEATURES, np.float32),
@@ -147,35 +83,7 @@ def wide_agg(own: np.ndarray, opponent: np.ndarray | None) -> np.ndarray:
 
 
 def _engineered_features(kp: np.ndarray, motion: np.ndarray) -> np.ndarray:
-    """Seven clip-level numbers that decide the classes the raw sequence can't.
-
-    kp: (n, 33, 4) normalized keypoints with the lock-on zeros already stripped.
-    motion: (n, 2) = [background pan px, raw hip-x fraction], aligned to the clip end.
-
-    - net forward motion: the fencer's WORLD travel = how she crossed the frame
-      (hip-x) plus how far the camera panned to follow her, signed by facing
-      direction. + advancing, - retreating. Combining both terms (not pan alone)
-      lifted advance/retreat direction accuracy 84% -> 94% across camera styles.
-    - stance width p90: the lunge's wide split, robust to single glitch frames.
-    - wrist speed p90: blade-hand activity, the parry signature.
-    - total travel: lots of it = footwork, little = blade action on the spot.
-    - arm reach p90: how far the sword hand extends past the shoulder toward the
-      opponent. Straightened arm (extension, and the extension inside a lunge) vs
-      bent guard. Also the signal a Phase 5 priority engine reads for who
-      extended first -- which is why extension is a feature here, not a class.
-    - crouch: 0 (legs straight) .. 1 (deeply bent knees). Separates the crouched
-      fencing actions (advance/lunge/retreat ~135-145 deg) from upright non-fencing
-      (walking/neutral ~164 deg). Without it advance and walking collapse together,
-      since both are just "moving forward" -- measured advance recall 52% -> fixed.
-    - first mover: +1 front ankle moves first, -1 back ankle first. A second,
-      independent direction signal -- see _first_mover. advance recall 70% -> 88%.
-
-    Note two of these (net forward, total travel) are raw SUMS, so they scale with
-    window length; training clips run 24-48 frames while every inference window is
-    60. Normalising them to a rate was tested and came out a wash (val +0.8,
-    advance recall -13), so they are left as sums -- but it is a real train/serve
-    difference, not a tidy design.
-    """
+    """Seven clip-level numbers that decide the classes the raw sequence can't."""
     n = len(kp)
     if n < 2:
         return np.zeros(N_AGG_FEATURES, dtype=np.float32)
@@ -244,18 +152,7 @@ def _load_clip(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 
 class FencingDataset(Dataset):
-    """Keypoint clips under keypoints_dir/<action>/ as (sequence, features, label).
-
-    sequence   (SEQ_LEN, INPUT_SIZE) -- padded/trimmed keypoints
-    features   (N_AGG_FEATURES,)     -- see _engineered_features
-
-    Transient actions give one sample per clip (its first SEQ_LEN frames, where
-    the action lives). Sustained classes (SLICEABLE_CLASSES) are cut into
-    overlapping SEQ_LEN windows so a long walk/idle clip yields many samples.
-    `self.groups[i]` is the source clip index for sample i -- always split on
-    groups, never raw samples, or a clip's near-duplicate windows leak across
-    train/val and inflate accuracy.
-    """
+    """Keypoint clips under keypoints_dir/<action>/ as (sequence, features, label)."""
 
     def __init__(self, keypoints_dir: str | Path) -> None:
         keypoints_dir = Path(keypoints_dir)
@@ -308,11 +205,7 @@ class FencingDataset(Dataset):
 
 def group_stratified_split(labels: list[int], groups: list[int], val_per_class: int,
                            seed: int) -> tuple[list[int], list[int]]:
-    """Hold out val_per_class whole CLIPS per class; return (train_idx, val_idx).
-
-    Splitting whole clips (groups), not windows, keeps a sliced clip's windows
-    together so validation stays honest.
-    """
+    """Hold out val_per_class whole CLIPS per class; return (train_idx, val_idx)."""
     labels_arr = np.array(labels)
     groups_arr = np.array(groups)
     rng = np.random.default_rng(seed)
@@ -327,60 +220,16 @@ def group_stratified_split(labels: list[int], groups: list[int], val_per_class: 
 
 
 class ActionLSTM(nn.Module):
-    """LSTM over the keypoint sequence, engineered clip stats joined at the head.
-
-    (batch, SEQ_LEN, INPUT_SIZE) + (batch, N_AGG_FEATURES) -> (batch, NUM_CLASSES)
-    raw logits. No softmax here, CrossEntropyLoss wants the logits as-is.
-    Mean-pooled over time (a lunge is a brief peak somewhere in the window, the
-    final hidden state alone tended to forget it).
-
-    Pooling covers only the REAL frames, never the zero padding. Clip length is
-    strongly class-correlated (lunge/parry ~24f = 60% padding, advance 46f,
-    retreat 48f, sliced neutral/walking 0%), so pooling across the padding let
-    the model read "how much of this window is zeros" as a class cue. It scored
-    well on validation, which pads the same way, and then collapsed on video,
-    which never pads: re-padding the same clips by holding the last real frame
-    instead of zeros dropped in-sample accuracy 85% -> 53% and flipped 40% of
-    calls (lunge->advance on 16 clips). Masking removed that dependence --
-    accuracy on hold-padded validation went 82.3% -> 85.0% and the gap between
-    the two padding styles went 4.0 -> 0.8 points, at a cost of 0.6 points on
-    the zero-padded score that was partly measuring the artifact.
-    """
+    """LSTM over the keypoint sequence, engineered clip stats joined at the head."""
 
     POOL_MODES = ("mean", "max", "last")
 
     def __init__(self, pool: str = "mean", n_agg: int = N_AGG_FEATURES) -> None:
-        """`pool` selects the time reduction. DEFAULTS TO "mean" for a reason:
-        every checkpoint trained before 2026-08-09 used it, and all three modes
-        have IDENTICAL parameter shapes, so a mismatched mode loads silently and
-        just behaves wrong. A checkpoint's mode is part of its identity -- see
-        demo_video.POOL_MODE, which is set alongside MODEL_PATH.
-
-        Measured leave-one-bout-out (scripts/exp_pooling.py), continuous training,
-        `last` against the `mean` baseline:
-
-            bout 1  69.0% -> 73.0%      bout 3  64.9% -> 69.8%
-            bout 4  57.9% -> 62.6%
-
-        Consistent +4 to +5 on all three, and it is the transient and quiet
-        classes that move: on bout 4 (3819 windows) lunge 37% -> 56%, advance
-        30% -> 43%, parry 13% -> 20%. Averaging a 0.7 s lunge across a 2 s window
-        was destroying it, and a window is scored at its NEWEST frame, so the last
-        real timestep is the one the label actually describes.
-
-        NOTE an earlier attempt at this conclusion was wrong -- it used the
-        per-frame model, which turned out to be a degenerate lunge predictor. The
-        difference here is a single-output model, three held-out bouts, and
-        precision reported next to recall.
-        """
+        """`pool` selects the time reduction. DEFAULTS TO "mean" for a reason:"""
         super().__init__()
         if pool not in self.POOL_MODES:
             raise ValueError(f"pool must be one of {self.POOL_MODES}, got {pool!r}")
         self.pool = pool
-        # n_agg is N_AGG_WIDE (13) for opponent-aware checkpoints, N_AGG_FEATURES
-        # (6) otherwise. UNLIKE `pool`, a mismatch here is loud -- the head's first
-        # Linear has a different shape, so load_state_dict raises instead of
-        # silently misbehaving. That is why n_agg is safe to infer and pool is not.
         self.n_agg = n_agg
         self.lstm = nn.LSTM(INPUT_SIZE, HIDDEN_SIZE, batch_first=True)
         self.head = nn.Sequential(
@@ -410,33 +259,7 @@ class ActionLSTM(nn.Module):
 
 
 class ActionFrameLSTM(nn.Module):
-    """Per-FRAME classifier: (batch, T, INPUT_SIZE) + agg -> (batch, T, NUM_CLASSES).
-
-    The window model has to answer "which single action is this 2 s window?", and
-    for live footage that question often has no correct answer -- a window during
-    an exchange holds step-step-lunge-recover. Forced to pick one, the model falls
-    to whichever class has the loosest boundary, which is why `lunge` ran at ~42%
-    of bout windows against a realistic 10-15% and swallowed `advance`.
-
-    Labelling per frame lets one window say "advance here, lunge there". It needs
-    no new annotation, since every clip is a single action and therefore every
-    real frame in it already carries that label -- and it turns 488 windows into
-    ~20k supervised frames, which is the thin transient classes (advance: 35
-    clips, ~1600 frames) attacked directly.
-
-    Measured over 12 seeds against the window model: bout advance 9.7% -> 14.3%
-    and bout lunge 42.3% -> 31.0%, both about 2 sigma, for ~3 points of held-out
-    accuracy (86% -> 83%). A real but moderate gain, not a cure. Kept alongside
-    the window model rather than replacing it so the two can be compared on real
-    footage.
-
-    DO NOT ensemble this one. Averaging 5 per-frame members on the bout gave
-    lunge 49% -> 23% (the best lunge number measured anywhere) but advance
-    16% -> 8% and parry 5% -> 0% -- a class gone entirely. Averaging dilutes the
-    probability peaks of BRIEF actions, which every transient class here is, so
-    the persistent classes take every frame. Ensembling helps the window model
-    and harms this one; ship a single checkpoint.
-    """
+    """Per-FRAME classifier: (batch, T, INPUT_SIZE) + agg -> (batch, T, NUM_CLASSES)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -450,11 +273,6 @@ class ActionFrameLSTM(nn.Module):
 
     def forward(self, x: torch.Tensor, agg: torch.Tensor,
                 lengths: torch.Tensor | None = None) -> torch.Tensor:
-        # `lengths` is accepted but unused: this head emits a label per timestep,
-        # so there is nothing to pool and nothing to mask here. Padding is handled
-        # where it matters -- the training loss masks it, and callers reduce with
-        # frame_logits_to_window(logits, lengths). The argument stays so this is
-        # drop-in interchangeable with ActionLSTM and ActionEnsemble.
         out, _ = self.lstm(x)                              # (B, T, HIDDEN)
         agg_t = agg[:, None, :].expand(-1, out.shape[1], -1)
         return self.head(torch.cat([out, agg_t], dim=-1))  # (B, T, NUM_CLASSES)
@@ -462,13 +280,7 @@ class ActionFrameLSTM(nn.Module):
 
 def frame_logits_to_window(logits: torch.Tensor, lengths: torch.Tensor | None = None,
                            mode: str = "last") -> torch.Tensor:
-    """(B, T, C) per-frame logits -> (B, C) one call per window.
-
-    mode="last": the newest REAL frame, i.e. what is happening now -- the right
-    read for a live overlay, where the window is the trailing 2 s of a track.
-    mode="vote": majority over real frames, for comparing against the window
-    model's clip-level accuracy on held-out clips.
-    """
+    """(B, T, C) per-frame logits -> (B, C) one call per window."""
     b, t, c = logits.shape
     if lengths is None:
         lengths = torch.full((b,), t, dtype=torch.long, device=logits.device)
@@ -486,20 +298,7 @@ def frame_logits_to_window(logits: torch.Tensor, lengths: torch.Tensor | None = 
 
 
 class ActionEnsemble(nn.Module):
-    """Several ActionLSTMs averaged in probability space. Same call signature.
-
-    Not for accuracy -- for CONSISTENCY. A single checkpoint is a lottery on real
-    video: at essentially equal validation accuracy, seeds land anywhere from
-    advance=6%/lunge=50% to advance=25%/lunge=7% on the same 40 s bout, because
-    488 windows (advance 35 clips, retreat 33, lunge 48) do not pin down the
-    advance/lunge/retreat boundary. Validation cannot tell those seeds apart, and
-    choosing by demo behaviour would be fitting to the footage being judged.
-    Averaging removes the need to choose: measured 2.4x less out-of-domain
-    variance (sd 4.1% -> 1.7%) and a small validation gain.
-
-    It does NOT fix the lunge bias -- five members still average 42% lunge on a
-    bout that should be nearer 10-15%. That one is systematic; see CLAUDE.md.
-    """
+    """Several ActionLSTMs averaged in probability space. Same call signature."""
 
     def __init__(self, members: list["ActionLSTM"]) -> None:
         super().__init__()
@@ -509,9 +308,6 @@ class ActionEnsemble(nn.Module):
 
     def forward(self, x: torch.Tensor, agg: torch.Tensor,
                 lengths: torch.Tensor | None = None) -> torch.Tensor:
-        # average PROBABILITIES, not logits: logits are not calibrated across
-        # independently trained members, so averaging them lets an overconfident
-        # member dominate. Returned as a log so downstream softmax is a no-op.
         probs = torch.stack([torch.softmax(m(x, agg, lengths), dim=-1)
                              for m in self.members]).mean(0)
         return torch.log(probs.clamp_min(1e-12))
@@ -520,19 +316,7 @@ class ActionEnsemble(nn.Module):
 def load_action_model(weights_path: str | Path,
                       device: torch.device | None = None,
                       cls: type[nn.Module] = ActionLSTM) -> nn.Module:
-    """Load the ensemble if members sit beside the checkpoint, else the single one.
-
-    Members are `<stem>.m0.pth`, `<stem>.m1.pth`, ... next to `weights_path`, so
-    an install without them keeps working on the single checkpoint unchanged.
-    `cls` selects the architecture, so this serves the per-frame model too --
-    ActionEnsemble softmaxes over the last dim, which is correct for both the
-    window model's (B, C) and the per-frame model's (B, T, C).
-
-    Ensembling matters MORE here than it looks: picking by validation accuracy
-    reliably lands on a lunge-heavy checkpoint (window seed 8 -> 52% lunge on the
-    bout, per-frame seed 7 -> 49%, against 12-seed averages of 42% and 31%).
-    Validation accuracy and demo behaviour are, if anything, anti-correlated.
-    """
+    """Load the ensemble if members sit beside the checkpoint, else the single one."""
     weights_path = Path(weights_path)
     device = device or _pick_device()
     members = sorted(weights_path.parent.glob(f"{weights_path.stem}.m*.pth"))
@@ -563,14 +347,7 @@ def train_action_model(
     seed: int = 42,
     quiet: bool = False,
 ) -> dict:
-    """Full training loop. Keeps whichever epoch scored best on validation.
-
-    seed controls both the train/val split and the weight init, so training a few
-    different seeds and keeping the winner gives a stronger shipped checkpoint.
-    quiet=True only prints every 10th epoch (plus new-best epochs).
-
-    Returns {"train_losses": [...], "val_losses": [...], "val_accuracies": [...]}.
-    """
+    """Full training loop. Keeps whichever epoch scored best on validation."""
     torch.manual_seed(seed)
     device = _pick_device()
     dataset = FencingDataset(keypoints_dir)
@@ -656,19 +433,7 @@ def train_frame_action_model(
     seed: int = 42,
     quiet: bool = False,
 ) -> dict:
-    """Train the per-frame ActionFrameLSTM. Same data, same splits, per-frame loss.
-
-    No separate dataset is needed: FencingDataset already reports each window's
-    real-frame count, and every clip is a single action, so the per-frame target
-    is just that label repeated over the real frames and masked off the padding.
-
-    Class weights come from FRAME counts rather than clip counts, since that is
-    what the loss actually sums over -- weighting by clips would under-weight the
-    long sliced walking/neutral windows relative to the short transient ones.
-
-    Model selection uses majority-vote window accuracy so the number is directly
-    comparable to train_action_model's val accuracy.
-    """
+    """Train the per-frame ActionFrameLSTM. Same data, same splits, per-frame loss."""
     torch.manual_seed(seed)
     device = _pick_device()
     dataset = FencingDataset(keypoints_dir)

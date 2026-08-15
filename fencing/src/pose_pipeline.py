@@ -80,13 +80,7 @@ def _landmarks_to_array(result: mp.tasks.vision.PoseLandmarkerResult) -> np.ndar
 
 
 def _normalize(kp: np.ndarray) -> np.ndarray:
-    """Center the keypoints on the hips and scale by torso length, so it doesn't
-    matter where the fencer is standing or how big they are in frame. 
-
-    Torso length (shoulder midpoint to hip midpoint) instead of shoulder width:
-    fencers stand side-on, so the projected shoulder distance collapses to almost
-    nothing and the scale blew up (measured ~300x on real clips). The torso stays
-    a stable reference from every angle. z and visibility stay untouched."""
+    """Center the keypoints on the hips and scale by torso length, so it doesn't"""
     kp = kp.copy()
     head_center = (kp)
     hip_mid = (kp[HIP_LEFT, :2] + kp[HIP_RIGHT, :2]) / 2.0
@@ -109,13 +103,7 @@ def _median3(xy: np.ndarray) -> np.ndarray:
 
 
 def _normalize_sequence(kp_seq: np.ndarray) -> np.ndarray:
-    """Clip-level cleanup: despike, center on the hips, scale by body height.
-
-    Body height (shoulder-mid to ankle-mid, median over the clip) instead of a
-    per-frame torso length: the torso foreshortens when a fencer leans into a
-    lunge, and dividing by it each frame crushed exactly the leg-spread signal
-    that makes a lunge a lunge. One stable scale per clip keeps proportions
-    honest across the whole action. z and visibility stay untouched."""
+    """Clip-level cleanup: despike, center on the hips, scale by body height."""
     if len(kp_seq) == 0:
         return kp_seq
     kp = kp_seq.copy()
@@ -131,13 +119,7 @@ def _normalize_sequence(kp_seq: np.ndarray) -> np.ndarray:
 
 
 def _estimate_pan(grays: list[np.ndarray]) -> np.ndarray:
-    """Per-frame horizontal background shift in px (at 320px width), + = scene moved right.
-
-    The broadcast camera follows the fencer, so her true travel barely shows in
-    the keypoints -- but it's written all over the background. Phase-correlate the
-    left/right border strips of the content region between consecutive frames:
-    borders so the fencer herself doesn't vote, content region so the static
-    pillarbox bars and scoreboard don't pin the answer to zero."""
+    """Per-frame horizontal background shift in px (at 320px width), + = scene moved right."""
     n = len(grays)
     if n < 2:
         return np.zeros(max(n, 1), dtype=np.float32)
@@ -174,14 +156,7 @@ def extract_keypoints_from_frame(frame: np.ndarray) -> np.ndarray:
 
 
 def extract_keypoints_and_pan_from_video(video_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
-    """Whole video -> ((n, 33, 4) cleaned keypoints, (n, 2) motion track).
-
-    Motion track columns: [background pan (px @320w), raw hip-x (fraction of frame
-    width, BEFORE hip-centering)]. Together they recover the fencer's true travel:
-    world motion = how she moved across the frame (hip-x) + how far the camera
-    moved to keep her there (pan). Pan alone was enough when the camera tracked her
-    tightly; on looser broadcasts she visibly crosses the frame, and the hip-x term
-    is what catches that. Meant for short clips (buffers small grayscale frames)."""
+    """Whole video -> ((n, 33, 4) cleaned keypoints, (n, 2) motion track)."""
     video_path = Path(video_path)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():

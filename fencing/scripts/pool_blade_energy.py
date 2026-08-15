@@ -1,19 +1,4 @@
-"""Pool blade-energy intervals across bouts and score v1 against v2 ONCE.
-
-Written before the runs finished, deliberately. Scoring bout by bout is how this
-measurement produced a retraction the first time: p99 read 0.70 on bout 2, a
-mechanism was written around it, and bout 1 came back 0.49. With three separate
-tables in front of you it is very easy to notice the good one.
-
-So the verdict is a single pooled number over every labelled parry, and the
-per-bout table is printed underneath only to show whether the pooled figure is
-consistent or is one bout carrying the others.
-
-v1 = axis-aligned box, global-pan compensation      (blade/torso, p99)
-v2 = oriented strip, fencer's-own-torso alignment   (strip/ctrl, p99)
-
-usage: py -3 scripts/pool_blade_energy.py
-"""
+"""Pool blade-energy intervals across bouts and score v1 against v2 ONCE."""
 import sys
 from collections import defaultdict
 from pathlib import Path

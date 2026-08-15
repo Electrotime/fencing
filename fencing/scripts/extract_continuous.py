@@ -1,28 +1,4 @@
-"""Extract TRAINING windows from continuous footage + interval labels.
-
-Until now the model has only ever trained on hand-cut clips in data/clips/ (488
-windows). Interval labels were used for evaluation and for the class prior, never
-for learning. This closes that gap.
-
-Why it matters beyond volume: a clip is cut AROUND an action, so the corpus
-cannot contain transitions -- advance into lunge, retreat into parry, the settle
-after a stop. Those are most of real footage and all of the hard cases. Three
-separate metrics in this project have been wrong because they measured a property
-of how clips were cut rather than of fencing (zero-padding, bout label mix,
-clip-start alignment). Continuous windows have no cut to measure.
-
-CORRECTNESS REQUIREMENT: the tensors written here must be byte-identical in
-construction to what _classify_window builds at inference. Same normalisation,
-same engineered features, same padding, same gates, same "window is labelled by
-its NEWEST frame" convention as evaluate_labels. If extraction and inference
-disagree, training silently optimises for the wrong thing -- which is exactly the
-failure mode this project keeps hitting.
-
-Writes data/train_continuous/<stem>.npz with X, agg, lengths, y, time, slot.
-One pass per video is expensive (roughly 2.7x realtime), so it is cached.
-
-usage: py -3 scripts/extract_continuous.py <video.mp4> <labels.csv>
-"""
+"""Extract TRAINING windows from continuous footage + interval labels."""
 import csv
 import sys
 from collections import Counter, defaultdict
@@ -47,12 +23,7 @@ SLOT_OF = {"left": "A", "right": "B"}
 
 
 def load_truth(path):
-    """Interval labels -> slot -> [(start, end, label)], two-track collapsed.
-
-    Collapse rule matches evaluate_labels exactly: blade wins only if it is a
-    label the model can emit, so `extension` falls through to footwork instead of
-    becoming an unscorable class.
-    """
+    """Interval labels -> slot -> [(start, end, label)], two-track collapsed."""
     truth = defaultdict(list)
     with open(path, encoding="utf-8") as f:
         rdr = csv.DictReader(r for r in f if not r.startswith("#"))
@@ -69,12 +40,7 @@ def load_truth(path):
 
 
 def window_tensors(track):
-    """(flat, agg, n_real) exactly as _classify_window builds them, or None.
-
-    Mirrors evaluate_labels.long_window_probs, which mirrors _classify_window.
-    Gates included on purpose: a window the demo would REFUSE to classify is not
-    a window worth training on, and keeping them makes train and serve agree.
-    """
+    """(flat, agg, n_real) exactly as _classify_window builds them, or None."""
     kp_seq = np.stack(track.kp)[-D.WINDOW_LONG:]
     mot = np.array(track.motion, dtype=np.float32)[-D.WINDOW_LONG:]
     real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)

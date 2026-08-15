@@ -71,3 +71,9 @@ fencing/data/labels/*_probs_*.npz
 # future changes from being published; it does not erase what is there. Purging
 # it properly needs a history rewrite (git filter-repo / BFG) and a force push.
 fencing/CLAUDE.md
+
+# DEV_NOTES.md is the prose that used to live inside the source -- comment blocks
+# and long docstrings, moved out 2026-08-14 so the published code reads cleanly.
+# Local only, same reasoning as CLAUDE.md. Entries are anchored to pre-strip line
+# numbers, so `git show <commit-before-strip>:<file>` is the way to line them back up.
+fencing/DEV_NOTES.md

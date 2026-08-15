@@ -1,12 +1,4 @@
-"""Train the action LSTM across several seeds and ship the strongest checkpoint.
-
-Each seed gets a different train/val split and weight init; the winner's weights
-end up in models/action_lstm.pth so the shipped model isn't hostage to one
-unlucky split. Quote the MEAN accuracy across seeds, not the winner's number --
-the winner is picked on its own val set, so its score runs optimistic.
-
-Run from project root:  python src/train_action.py
-"""
+"""Train the action LSTM across several seeds and ship the strongest checkpoint."""
 
 from __future__ import annotations
 

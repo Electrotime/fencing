@@ -1,36 +1,4 @@
-"""Two heads -- footwork and blade -- instead of one six-way choice.
-
-This is what the two-track schema was FOR, and it has never been built. The
-argument: `parry` has to out-compete five footwork classes to be emitted at all,
-while physically it co-occurs with them (63 labelled parries: 34 retreat, 7
-neutral, 5 advance underneath). A separate blade head only has to beat `none` and
-`extension`, so a parry no longer has to be a better explanation than the retreat
-it is happening during.
-
-LABEL AVAILABILITY IS THE HARD PART, and fabricating the missing half would
-quietly poison this:
-
-  bouts 3, 4   two-track -> BOTH tracks known
-  bouts 1, 2   single-track -> a `parry` row gives blade=parry and says NOTHING
-               about the footwork; any other row gives footwork, and blade is
-               UNKNOWN, not `none` -- the old schema forced one label, so a parry
-               during a retreat had to be written `retreat`
-  clips        a parry clip gives blade=parry, footwork unknown; other clips give
-               footwork, blade unknown (a clip cut as `advance` may well contain
-               an extension)
-
-So both heads take a masked loss: -1 means "not labelled", contributes nothing.
-Negative `none` evidence comes from bouts 3-4, which record it explicitly (bout 4
-alone has ~185 blade=none rows), so the blade head is not starved of negatives.
-
-Scored three ways, because they answer different questions:
-  footwork  5-way accuracy (parry removed from the footwork vocabulary)
-  blade     parry precision/recall -- the point of the exercise
-  collapsed blade-priority back to one label, using the SAME rule evaluate_labels
-            uses, so it is directly comparable to the six-way model
-
-usage: py -3 scripts/exp_two_head.py --holdout 3 [--seeds 2]
-"""
+"""Two heads -- footwork and blade -- instead of one six-way choice."""
 import argparse
 import csv
 import sys
@@ -59,10 +27,6 @@ F_IX = {n: i for i, n in enumerate(FOOT)}
 B_IX = {n: i for i, n in enumerate(BLADE)}
 CSV_FOR = {"1": "bout1_intervals.csv", "2": "bout2_intervals.csv",
            "3": "bout3_intervals_2track.csv", "4": "bout4_intervals_2track.csv",
-           # bout 5 is two-track, so BOTH tracks are known for all 144 intervals.
-           # It is the test of this experiment's own prediction: holding out bout 4
-           # previously left just 189 blade labels in training (parry lamp at
-           # chance), and bout 5 feeds exactly that starved arm.
            "5": "bout5_intervals_2track.csv"}
 
 
@@ -100,11 +64,6 @@ def load_bout(stem, stride=1, opponent=False):
             if a <= float(t) < b:
                 fw[i], bl[i] = fi, bi
                 break
-    # The shipped single-head model reads the OPPONENT's engineered features, worth
-    # +2.9 pts there. Without this the two-head arm is handicapped against the model
-    # it is being compared to, and a parry is precisely the action whose stimulus is
-    # on the other fencer -- 34 of 63 parries happen during a retreat because the
-    # opponent is attacking.
     agg = with_opponent(CONT / f"{stem}.npz")[0]["wide"] if opponent else d["agg"]
     full = dict(X=d["X"], agg=agg, lengths=d["lengths"], y=d["y"], fw=fw, bl=bl)
     return {"eval": full, "train": {k: v[::stride] for k, v in full.items()}}
@@ -157,21 +116,8 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--stride", type=int, default=3)
     ap.add_argument("--pool", default="last", choices=("mean", "max", "last"))
-    # Sweep the blade head's decision threshold. As TWO INDICATORS a false parry
-    # only lights a lamp wrongly -- it no longer overwrites a correct footwork
-    # call -- so the usable operating point is a precision/recall trade, not the
-    # argmax. Aaron's framing; the collapsed metric could not see this.
     ap.add_argument("--thresholds", default="0.25,0.4,0.5,0.6,0.75,0.9")
-    # Keep this fraction of BLADE labels, masking the rest to -1. Footwork labels
-    # are untouched, so this isolates "how much blade supervision" from every other
-    # variable -- the question being whether labelling more parries would actually
-    # make the lamp usable, or whether it plateaus at chance.
     ap.add_argument("--blade-frac", type=float, default=1.0)
-    # Give both heads the opponent's engineered features, as the shipped single-head
-    # model does. IMPLIES NO CLIPS: a clip is a single-fencer file, so its opponent
-    # block is all zeros and perfectly correlated with "came from a clip" -- measured
-    # harmful (-3.4 on bout 1) for the single head, and there is no reason it would
-    # behave differently here.
     ap.add_argument("--opponent", action="store_true")
     a = ap.parse_args()
 

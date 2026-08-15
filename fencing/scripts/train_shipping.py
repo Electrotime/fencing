@@ -1,34 +1,4 @@
-"""Train the shippable checkpoint on clips + continuous windows.
-
-Two modes, because "the model we ship" and "the number we can honestly quote" are
-different objects:
-
-  --holdout N   train on clips + every bout EXCEPT N. Used to VERIFY that the
-                offline tensor evaluation in train_continuous.py matches a real
-                end-to-end evaluate_labels run on bout N. Nothing is shipped from
-                this; it exists to catch train/serve disagreement.
-
-  --ship        train on clips + ALL bouts. Strictly more data, so it should be at
-                least as good -- but it cannot then be honestly scored on those
-                bouts. The honest generalisation estimate remains the
-                leave-one-bout-out figure (60.4%), already measured.
-
-NO BEST-EPOCH SELECTION, deliberately. load_action_model's docstring records that
-picking checkpoints by validation accuracy reliably lands on lunge-heavy models
-(seed 8 -> 52% lunge against a 42% average) and that validation accuracy and demo
-behaviour are anti-correlated here. Fixed epochs plus seed ensembling avoids
-choosing on a metric known to mislead.
-
-NO CLASS WEIGHTING, also deliberately. Continuous windows arrive at their natural
-frequencies; training on those gives the model a correct prior directly, and
-measured identically (60.4%) to inverse-frequency weighting plus the post-hoc
-CLASS_PRIOR. Set APPLY_CLASS_PRIOR=False in demo_video when using this checkpoint
--- applying it on top would correct a prior that is already right.
-
-usage:
-  py -3 scripts/train_shipping.py --holdout 1 --out models/verify_h1.pth
-  py -3 scripts/train_shipping.py --ship --out models/action_cont.pth
-"""
+"""Train the shippable checkpoint on clips + continuous windows."""
 import argparse
 import sys
 from collections import Counter
@@ -55,15 +25,7 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--members", type=int, default=4)
     ap.add_argument("--stride", type=int, default=3)
-    # A checkpoint's pooling mode is part of its identity: all modes share the same
-    # parameter shapes, so loading with the wrong one succeeds silently and behaves
-    # wrong. Whatever is used here must match demo_video.POOL_MODE.
     ap.add_argument("--pool", default="last", choices=ActionLSTM.POOL_MODES)
-    # Opponent context: agg becomes [own(6)|opponent(6)|present(1)]. Implies
-    # --no-clips, because clip windows are single-fencer files with no opponent to
-    # pair with, and an all-zero opponent block is perfectly correlated with "came
-    # from a clip" -- a source shortcut. Measured: clips+opponent scored -3.4 on
-    # bout 1 while continuous-only+opponent scored +0.5/+2.1/+6.2.
     ap.add_argument("--opponent", action="store_true")
     ap.add_argument("--no-clips", action="store_true")
     a = ap.parse_args()

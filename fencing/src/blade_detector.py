@@ -22,11 +22,7 @@ def load_blade_model(weights_path: str | Path) -> YOLO:
 
 
 def get_blade_tip(frame: np.ndarray, model: YOLO) -> tuple[float, float] | None:
-    """Center of the most confident blade box as (x, y), or None if no blade found.
-
-    The box center isn't literally the tip, but without knowing which end points
-    at the opponent it's the safest single point to use.
-    """
+    """Center of the most confident blade box as (x, y), or None if no blade found."""
     results = model(frame, conf=MIN_BLADE_CONFIDENCE, verbose=False)
     boxes = results[0].boxes
     if boxes is None or len(boxes) == 0:

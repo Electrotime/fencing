@@ -1,11 +1,4 @@
-"""Run the pose pipeline on every action clip and save the keypoints as .npy files.
-
-Clips that already have a keypoint file get skipped, so this is safe to rerun
-whenever new clips get added. Use --force to redo everything (say, if a clip
-got re-cut under the same name).
-
-Run from project root:  python scripts/process_clips.py [--force]
-"""
+"""Run the pose pipeline on every action clip and save the keypoints as .npy files."""
 
 import argparse
 import sys

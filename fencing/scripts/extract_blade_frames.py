@@ -1,10 +1,4 @@
-"""Grab frames from the raw match videos so I can label blades in Roboflow.
-
-Saves ~400 frames total (TARGET_TOTAL_FRAMES), spread evenly across all the
-videos, as jpgs in data/blade_frames/.
-
-Run from project root:  python scripts/extract_blade_frames.py
-"""
+"""Grab frames from the raw match videos so I can label blades in Roboflow."""
 
 from pathlib import Path
 
@@ -49,13 +43,7 @@ def pick_frame_indices(total_frames: int, count: int) -> set[int]:
 
 
 def extract_frames(video_path: Path, output_dir: Path, count: int) -> int:
-    """Save evenly spaced frames from one video as jpgs. Returns how many got written.
-
-    Jumps straight to each frame we want instead of decoding the whole video,
-    which is way faster since we only keep ~50 frames out of thousands. Seeking
-    isn't perfectly frame-accurate on every codec, but for labeling frames it
-    really doesn't matter.
-    """
+    """Save evenly spaced frames from one video as jpgs. Returns how many got written."""
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         print(f"  couldn't open {video_path.name}, skipping it")

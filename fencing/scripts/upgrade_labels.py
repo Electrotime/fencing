@@ -1,29 +1,4 @@
-"""Lift a single-track label file to the two-track (footwork+blade) schema.
-
-Most of the conversion is mechanical, but NOT all of it, and the rows it cannot
-decide are exactly the interesting ones. Those get written as TODO rather than
-guessed -- guessing is how the last three metrics ended up measuring an artifact
-of the data instead of fencing.
-
-  neutral, walking   -> footwork=<same>, blade=none      (confident: fencer is idle)
-  advance, retreat   -> footwork=<same>, blade=TODO      (usually none, but a parry
-                                                          may have gone unrecorded --
-                                                          the old schema forced ONE
-                                                          label, so a parry during a
-                                                          retreat had to be dropped)
-  lunge              -> footwork=lunge, blade=TODO       (a lunge nearly always
-                                                          carries an extension, but
-                                                          "nearly always" is not data)
-  parry              -> footwork=TODO,  blade=parry      (the footwork underneath was
-                                                          never recorded -- this is the
-                                                          whole reason for the schema)
-  extension          -> footwork=TODO,  blade=extension
-
-Run check_labels.py on the result once the TODOs are filled in.
-
-usage: py -3 scripts/upgrade_labels.py data/labels/bout1_intervals.csv
-       (writes bout1_intervals_2track.csv beside it; never overwrites the input)
-"""
+"""Lift a single-track label file to the two-track (footwork+blade) schema."""
 import csv
 import sys
 from collections import Counter

@@ -1,21 +1,4 @@
-"""Does labelling MORE footage still pay? Measure it instead of guessing.
-
-Aaron has labelled ~1000 s of fencer-time across four bouts and the obvious next
-question is whether a fifth bout is worth hours of his time. That is answerable
-from data already in hand: train on increasing amounts of it and see whether
-held-out accuracy is still climbing at the point we have reached.
-
-DESIGN DETAIL THAT MATTERS: the fraction is taken as a CONTIGUOUS SLICE OF TIME,
-not as a random sample of windows. Labelling less footage means covering less of
-the match, not sampling sparsely across all of it -- and because neighbouring
-windows share 92% of their frames, a random 25% sample still covers essentially
-the whole bout and would flatter the curve badly. `--random-subsample` is provided
-to demonstrate exactly that difference rather than to be used.
-
-Held-out bout is never trained on, at any fraction.
-
-usage: py -3 scripts/learning_curve.py --holdout 1 [--seeds 2] [--random-subsample]
-"""
+"""Does labelling MORE footage still pay? Measure it instead of guessing."""
 import argparse
 import sys
 from pathlib import Path

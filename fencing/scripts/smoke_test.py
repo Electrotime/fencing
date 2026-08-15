@@ -1,8 +1,4 @@
-"""Import every library the project needs and print versions, so I know the
-environment is good before doing anything else.
-
-Run from the project root: python scripts/smoke_test.py
-"""
+"""Import every library the project needs and print versions, so I know the"""
 
 import importlib
 import sys

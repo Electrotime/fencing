@@ -1,40 +1,4 @@
-"""Transcribe Aaron's bout 5 table -> two-track CSV. Anomalies FLAGGED, not fixed.
-
-Bout 5 (`data/raw_video/5.mp4`) is the NEW-VENUE footage several open items were
-waiting on: 9.6 min, 1906x1080 at exactly 30.000 fps, against bouts 1-4 which are all
-1920x1080 at 29.97. Different resolution and frame rate means it genuinely exercises
-the hand-calibrated constants (MIN_BOX_H_FRAC, the silhouette thresholds, the pan
-strips) that no augmentation can test -- see CLAUDE.md, "What augmentation CANNOT
-touch".
-
-Fields per row: (time_string, A_footwork, A_blade, B_footwork, B_blade).
-Empty string = the cell was blank in the source table.
-
-THREE ANOMALIES IN THE SOURCE, all reported at the end of a run rather than fixed in
-silence, because a wrong guess puts an interval on the wrong action and nothing
-downstream would catch it:
-
- 1. DUPLICATED PHRASE at 03:21-03:30. The same five rows appear twice with slightly
-    different boundaries (03:27.169/03:27.869 vs 03:27.083/03:27.950). They are the
-    same phrase transcribed twice, not two phrases -- the video is only 9.6 min and a
-    real repeat would need the whole exchange to happen again inside 9 seconds.
-    Keeping both would double-count it AND create overlapping intervals, which
-    mis-score silently because truth_at() returns the first match. DROP_DUPLICATE
-    picks which copy to keep; the second is kept on the assumption that a
-    re-transcription supersedes. Flip it if that is backwards.
-
- 2. BACKWARDS TIMESTAMP at "04:04.067 - 04:10.183". The preceding row ends at
-    04:06.067, so this walk would start 2 s before the advance that precedes it.
-    Read as 04:06.067 (single digit slip, 4<->6), which makes it contiguous. The
-    alternative readings all leave an overlap.
-
- 3. A 0.233 s advance at 07:55.800 - 07:56.033 and a 0.233 s one at 06:22.784 -
-    06:23.017. Both are shorter than one 60-frame window and shorter than any
-    interval in bouts 1-4 (min 0.30 s). Transcribed as written -- they are legal,
-    just too short to score -- but they cannot be recovered by a 2 s window.
-
-usage: py -3 scripts/transcribe_bout5.py [--keep-first-duplicate]
-"""
+"""Transcribe Aaron's bout 5 table -> two-track CSV. Anomalies FLAGGED, not fixed."""
 import sys
 from pathlib import Path
 

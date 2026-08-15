@@ -1,40 +1,4 @@
-"""Does blade/torso motion energy help as a 7th ENGINEERED FEATURE? Measure, don't assume.
-
-Blade energy separates hand-cut parry INTERVALS well -- pooled AUC 0.79 over 70
-parries (`pool_blade_energy.py`). That is not the question the model faces. The model
-sees fixed 2 s WINDOWS, and measured on those the same feature is chance:
-
-    blade/torso p90 over the window, parry vs non-blade
-      span 2.00 s   bout3 0.34  bout4 0.49  bout5 0.43   pooled 0.53
-      span 0.35 s   bout3 0.51  bout4 0.65  bout5 0.57   pooled 0.66
-
-The gap is DILUTION: a parry lasts ~0.6 s, so a p90 over 2 s is mostly reporting
-whatever else was in the window. Shortening the span recovers a good part of it,
-monotonically, which is the same reasoning that made `last` pooling beat `mean`.
-BLADE_SPAN is therefore 0.35 s, not the full window -- deliberately a different
-temporal footprint from the other six features.
-
-Expectations are low and stated up front so they cannot be revised afterwards:
-0.66 pooled is weak, bout 3 sits at chance at every span, and `stance_ratio` had the
-best AUC ever tried here (0.91) and still made the model WORSE. AUC says a signal
-exists, never that the model lacks it.
-
-WHY THIS RUNS OFFLINE. Blade energy needs PIXELS, which `_engineered_features` never
-sees -- it takes keypoints and a motion track. Wiring it into the live pipeline means
-a third per-frame deque on FencerTrack and changes to extraction, the demo and the
-scorer. That is a lot of plumbing to install before knowing whether it pays, so this
-joins two existing caches by (slot, time) instead -- exactly how exp_opponent.py
-tested opponent context before it was built.
-
-  data/train_continuous/<stem>.npz   windows: X, agg, lengths, y, time, slot
-  data/labels/<stem>_blade.npz       per frame: blade, torso, time, slot
-
-Layout with --opponent (the shipped recipe): [own(7) | opponent(7) | present(1)] = 15,
-against the current 13. The opponent's blade energy is included on purpose -- a parry
-is a response to THEIR extension, which is what the parry gate exploits.
-
-usage: py -3 scripts/exp_blade_feature.py --holdout 4 [--seeds 2] [--span 0.35]
-"""
+"""Does blade/torso motion energy help as a 7th ENGINEERED FEATURE? Measure, don't assume."""
 import argparse
 import sys
 from pathlib import Path
@@ -57,11 +21,7 @@ NEUTRAL_FILL = 1.0       # "blade no hotter than torso"; measured to be needed o
 
 
 def blade_feature(stem, times, slots, span=BLADE_SPAN):
-    """p90 of blade/torso over the last `span` seconds of each window.
-
-    Returns (values, n_missing). Joined by (slot, time) rather than recomputed, so
-    this cannot drift from what pool_blade_energy.py scored.
-    """
+    """p90 of blade/torso over the last `span` seconds of each window."""
     cache = LAB / f"{stem}_blade.npz"
     if not cache.exists():
         raise SystemExit(f"no {cache.name}; run scripts/blade_energy.py on bout {stem}")
@@ -101,13 +61,7 @@ def load_bout(stem, span):
 
 
 def widen(bout, use_blade):
-    """[own | opponent | present] with the opponent matched on (slot, time).
-
-    Re-implemented rather than calling exp_opponent.with_opponent because that reads
-    the npz off disk and would not see the appended blade column. The pairing rule is
-    identical: exact float time match, safe because both slots' times come from the
-    same idx/fps on the same frame.
-    """
+    """[own | opponent | present] with the opponent matched on (slot, time)."""
     own = bout["agg7"] if use_blade else bout["agg6"]
     slot, time = bout["slot"].astype(str), bout["time"]
     index = {(s, float(t)): i for i, (s, t) in enumerate(zip(slot, time))}
@@ -129,11 +83,6 @@ def main() -> int:
     ap.add_argument("--stride", type=int, default=3)
     ap.add_argument("--pool", default="last")
     ap.add_argument("--span", type=float, default=BLADE_SPAN)
-    # THE CONTROL THAT DECIDES THIS. Adding a 7th feature also makes the head's first
-    # Linear wider, so "accuracy went up" can mean capacity rather than information.
-    # --shuffle permutes the blade column WITHIN each bout: identical marginal
-    # distribution, identical parameter count, zero alignment to the window it
-    # describes. If the gain survives that, it was never the blade.
     ap.add_argument("--shuffle", action="store_true")
     a = ap.parse_args()
 
