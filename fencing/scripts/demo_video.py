@@ -400,8 +400,19 @@ def main() -> None:
                 return float(a.split("=", 1)[1])
         return default
 
+    def _opt_str(name):
+        for i, a in enumerate(sys.argv):
+            if a == name and i + 1 < len(sys.argv):
+                return sys.argv[i + 1]
+            if a.startswith(f"{name}="):
+                return a.split("=", 1)[1]
+        return None
+
     start_s, end_s = _opt("--start"), _opt("--end")
+    model_arg = _opt_str("--model")
     _skip = {str(v) for v in (start_s, end_s) if v is not None}
+    if model_arg:
+        _skip.add(model_arg)
     argv = [a for a in sys.argv[1:]
             if a != "--frame-model" and not a.startswith("--") and a not in _skip]
     use_frame = "--frame-model" in sys.argv
@@ -422,9 +433,17 @@ def main() -> None:
                                          cls=ActionFrameLSTM)
         print(f"using the per-frame model ({FRAME_MODEL_PATH.name})")
     else:
+        mpath = MODEL_PATH
+        if model_arg:
+            mpath = Path(model_arg)
+            if not mpath.exists():
+                mpath = PROJECT_ROOT / "models" / mpath.name
+            if not mpath.exists():
+                sys.exit(f"no checkpoint at {model_arg}")
+            print(f"model override: {mpath.name}")
         # picks up the ensemble members if they are there, else the single checkpoint
         action_model = load_action_model(
-            MODEL_PATH, device=torch.device("cpu"),
+            mpath, device=torch.device("cpu"),
             cls=lambda: ActionLSTM(pool=POOL_MODE,
                                    n_agg=N_AGG_WIDE if USE_OPPONENT else 6))
     blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
