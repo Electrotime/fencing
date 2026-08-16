@@ -28,6 +28,8 @@ def main() -> int:
     ap.add_argument("--pool", default="last", choices=ActionLSTM.POOL_MODES)
     ap.add_argument("--opponent", action="store_true")
     ap.add_argument("--no-clips", action="store_true")
+    ap.add_argument("--mirror", action="store_true",
+                    help="double the windows with left-right mirrored poses")
     a = ap.parse_args()
     if bool(a.holdout) == bool(a.ship):
         print("pick exactly one of --holdout N or --ship")
@@ -60,9 +62,16 @@ def main() -> int:
         L = np.concatenate(pre[2] + [bouts[k]["train"]["lengths"] for k in use])
         Y = np.concatenate(pre[3] + [bouts[k]["train"]["y"] for k in use])
 
+    if a.mirror:
+        # aggregates are mirror-invariant (exp_mirror), so only the pose flips
+        from exp_mirror import mirror_flat
+        X = np.concatenate([X, mirror_flat(X)])
+        A, L, Y = np.concatenate([A, A]), np.concatenate([L, L]), np.concatenate([Y, Y])
+
     device = _pick_device()
     print(f"training on clips({len(cY)}) + bouts {use} = {len(Y)} windows, "
-          f"agg width {A.shape[1]}" + ("  [OPPONENT]" if a.opponent else ""))
+          f"agg width {A.shape[1]}" + ("  [OPPONENT]" if a.opponent else "")
+          + ("  [MIRRORED]" if a.mirror else ""))
     c = Counter(Y.tolist())
     print("  class mix: " + "  ".join(
         f"{n}={c.get(i, 0)}({c.get(i, 0) / len(Y):.0%})" for i, n in enumerate(CLASS_NAMES)))
