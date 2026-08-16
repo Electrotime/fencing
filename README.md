@@ -1,5 +1,5 @@
 # FenceVision
-**WIP**
+**WIP, things might NOT work**
 
 Action recognition for fencing from ordinary broadcast video. FenceVision detects both fencers in a frame and classifies what each one is doing at 20 predictions per second, using only the video feed. No sensors, no instrumented equipment, no marked piste.
 
