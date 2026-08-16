@@ -87,19 +87,20 @@ class FencerTrack:
 
 
 def _frame_pan(prev_gray: np.ndarray | None, gray: np.ndarray,
-               windows: dict) -> float:
+               windows: dict, strip_frac: float | None = None) -> float:
     """Horizontal background shift between two frames, from L/R border strips."""
     if prev_gray is None:
         return 0.0
     h, w = gray.shape
-    strip_w = max(10, int(PAN_STRIP_FRAC * w))
+    strip_w = max(10, int((PAN_STRIP_FRAC if strip_frac is None else strip_frac) * w))
     rows = slice(int(0.10 * h), int(0.75 * h))  # skip broadcast graphics / scoreboard
-    if "win" not in windows:
-        windows["win"] = cv2.createHanningWindow((strip_w, rows.stop - rows.start), cv2.CV_32F)
+    key = f"win{strip_w}"
+    if key not in windows:
+        windows[key] = cv2.createHanningWindow((strip_w, rows.stop - rows.start), cv2.CV_32F)
     shifts = []
     for a, b in [(0, strip_w), (w - strip_w, w)]:
         (dx, _), response = cv2.phaseCorrelate(prev_gray[rows, a:b], gray[rows, a:b],
-                                               windows["win"])
+                                               windows[key])
         if response > PAN_MIN_RESPONSE:
             shifts.append(dx)
     return float(np.median(shifts)) if shifts else 0.0

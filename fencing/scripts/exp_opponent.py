@@ -45,10 +45,10 @@ class WideAggLSTM(nn.Module):
         return self.head(torch.cat([pooled, agg], dim=-1))
 
 
-def with_opponent(npz_path):
+def with_opponent(npz_path, key="agg"):
     """Load a bout and widen agg to [own(6) | opponent(6) | present(1)]."""
     d = np.load(npz_path)
-    agg, slot, time = d["agg"], d["slot"], d["time"]
+    agg, slot, time = d[key], d["slot"], d["time"]
     # exact float times come straight from idx/fps for both slots on the same
     # frame, so an exact key match is safe here -- no tolerance needed
     index = {(str(s), float(t)): i for i, (s, t) in enumerate(zip(slot, time))}

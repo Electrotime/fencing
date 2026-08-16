@@ -1,7 +1,7 @@
 """Extract TRAINING windows from continuous footage + interval labels."""
 import csv
 import sys
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from pathlib import Path
 
 import cv2
@@ -20,6 +20,7 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
 
 OUTDIR = PROJECT / "data" / "train_continuous"
 SLOT_OF = {"left": "A", "right": "B"}
+PAN_WIDE_FRAC = 0.44      # the wider aperture benchmarked in pan_benchmark.py
 
 
 def load_truth(path):
@@ -39,8 +40,12 @@ def load_truth(path):
     return truth
 
 
-def window_tensors(track):
-    """(flat, agg, n_real) exactly as _classify_window builds them, or None."""
+def window_tensors(track, mot_alt=None):
+    """(flat, agg, n_real) exactly as _classify_window builds them, or None.
+
+    mot_alt gives a second motion track (a different pan estimator) over the same
+    frames; its agg is returned alongside so an A/B needs only one pose pass.
+    """
     kp_seq = np.stack(track.kp)[-D.WINDOW_LONG:]
     mot = np.array(track.motion, dtype=np.float32)[-D.WINDOW_LONG:]
     real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)
@@ -53,12 +58,16 @@ def window_tensors(track):
             return None
     norm = D._normalize_sequence(kp)
     agg = D._engineered_features(norm, mot)
+    agg_alt = None
+    if mot_alt is not None:
+        agg_alt = D._engineered_features(
+            norm, np.array(mot_alt, dtype=np.float32)[-D.WINDOW_LONG:])
     flat = norm.reshape(len(norm), -1).astype(np.float32)
     n_real = min(len(flat), D.SEQ_LEN)
     if len(flat) < D.SEQ_LEN:
         flat = np.concatenate(
             [flat, np.zeros((D.SEQ_LEN - len(flat), D.INPUT_SIZE), np.float32)])
-    return flat[:D.SEQ_LEN], agg, n_real
+    return flat[:D.SEQ_LEN], agg, n_real, agg_alt
 
 
 def main() -> int:
@@ -87,7 +96,9 @@ def main() -> int:
     lms = {s: _make_landmarker(mp.tasks.vision.RunningMode.VIDEO).__enter__()
            for s in ("A", "B")}
     prev_gray, pan_windows = None, {}
-    X, AG, LN, Y, TM, SL = [], [], [], [], [], []
+    X, AG, LN, Y, TM, SL, AGW = [], [], [], [], [], [], []
+    wide_motion = {s: deque(maxlen=D.SEQ_LEN) for s in ("A", "B")}
+    PAN_TRACK = []
     idx, skipped = 0, 0
 
     while True:
@@ -97,7 +108,9 @@ def main() -> int:
         gray = cv2.cvtColor(cv2.resize(frame, (320, 180)),
                             cv2.COLOR_BGR2GRAY).astype(np.float32)
         pan = D._frame_pan(prev_gray, gray, pan_windows)
+        pan_wide = D._frame_pan(prev_gray, gray, pan_windows, PAN_WIDE_FRAC)
         prev_gray = gray
+        PAN_TRACK.append((pan, pan_wide))
 
         # identical to demo_video's loop -- if this drifts, training optimises for
         # inputs that never occur at inference
@@ -124,6 +137,7 @@ def main() -> int:
                     t.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)
             t.kp.append(kp)
             t.motion.append((pan, t.last_hip_x))
+            wide_motion[slot].append((pan_wide, t.last_hip_x))
 
         if idx % D.PREDICT_EVERY == 0 and idx >= D.WINDOW_LONG:
             now = idx / fps
@@ -131,12 +145,12 @@ def main() -> int:
                 lab = truth_at(slot, now)
                 if lab is None or lab not in CLASS_NAMES:
                     continue
-                tens = window_tensors(tracks[slot])
+                tens = window_tensors(tracks[slot], wide_motion[slot])
                 if tens is None:
                     skipped += 1
                     continue
-                flat, agg, n_real = tens
-                X.append(flat); AG.append(agg); LN.append(n_real)
+                flat, agg, n_real, agg_wide = tens
+                X.append(flat); AG.append(agg); LN.append(n_real); AGW.append(agg_wide)
                 Y.append(CLASS_NAMES.index(lab)); TM.append(now); SL.append(slot)
         idx += 1
 
@@ -152,8 +166,10 @@ def main() -> int:
     np.savez_compressed(
         out,
         X=np.stack(X).astype(np.float32), agg=np.stack(AG).astype(np.float32),
+        agg_wide=np.stack(AGW).astype(np.float32),
         lengths=np.array(LN, dtype=np.int64), y=np.array(Y, dtype=np.int64),
-        time=np.array(TM, dtype=np.float32), slot=np.array(SL))
+        time=np.array(TM, dtype=np.float32), slot=np.array(SL),
+        pan_track=np.array(PAN_TRACK, dtype=np.float32))
     c = Counter(CLASS_NAMES[i] for i in Y)
     print(f"wrote {out.name}: {len(X)} labelled windows "
           f"({skipped} skipped by the frozen/too-short gates)")
