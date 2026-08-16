@@ -3,14 +3,15 @@
 
 Action recognition for fencing from ordinary broadcast video. FenceVision detects both fencers in a frame and classifies what each one is doing at 20 predictions per second, using only the video feed. No sensors, no instrumented equipment, no marked piste.
 
-Held-out accuracy is 76.6% on a bout the model never trained on, compared to 16.7% for random guessing.
+Held-out accuracy is 80.2% on a bout the model never trained on, and 68.8% at a venue it has never seen, compared to 16.7% for random guessing.
 
 ## Features
 
 - Six-class action recognition: `advance`, `retreat`, `walking`, `neutral`, `lunge`, `parry`
 - Simultaneous footwork and blade output, so a parry during a retreat is reported as both
 - Opponent-aware classification: each fencer's features include their opponent's
-- Rule-based parry gating that raises parry precision from 29% to 58%
+- Rule-based parry gating that raises parry precision from 29% to 56%
+- Mirror augmentation for left- and right-handed fencers, worth 7 points against a matched control
 - Annotated video output with per-fencer overlays
 - Leave-one-bout-out evaluation scripts and per-feature ablation controls
 
@@ -22,7 +23,7 @@ cd fencing/fencing
 pip install -r requirements.txt
 ```
 
-Python 3.9+ is required. The shipped checkpoint is `models/action_opp5.pth`. Every path
+Python 3.9+ is required. The shipped checkpoint is `models/action_mirror.pth`. Every path
 below is relative to the inner `fencing/` directory, which is where the package, scripts
 and data live.
 
@@ -51,6 +52,8 @@ Each fencer's normalised skeleton feeds two paths. A rolling 60-frame sequence (
 
 Three choices account for most of the accuracy. First, the LSTM output is reduced with `last` rather than `mean`, worth 4 to 5 points: a parry lasts about 0.6 s inside a 2 s window, so averaging buries it under the rest of the window. Second, each fencer's feature vector is concatenated with their opponent's, as `[own(6) | opponent(6) | present(1)]`, because a retreat means something different when the other fencer is lunging. Third, normalising the skeletons keeps the posture features camera-invariant, which is why they generalise across venues while raw motion features do not (see [Cross-venue behaviour](#cross-venue-behaviour)).
 
+A fourth, added later, is mirror augmentation. Normalisation already removes translation and scale, so cropping or zooming the video produces near-identical tensors, but it does not remove handedness: which arm extends toward the opponent survives every normalisation step. The training corpus happened to contain only one handedness in its right-hand slot, and a left-handed fencer at a new venue scored 35% while their opponent scored 71%. Mirroring the pose sequences fixed that specific gap and helped generally, because the six engineered features are provably mirror-invariant, so only the sequence the LSTM reads is flipped.
+
 ## Parry detection
 
 Parry is the hardest class: brief, small, and physically overlapping with footwork. The raw classifier ran at 29% precision, which makes an on-screen indicator worse than useless.
@@ -59,10 +62,12 @@ Across bouts 3 to 5, 86% of labelled parries have the opponent attacking at the 
 
 | Rule | Condition | Effect on held-out bout 4 |
 |---|---|---|
-| Veto | Parry predicted, opponent not attacking, demote | Precision 29% -> 55% |
-| Promote | Parry lost the argmax, opponent clearly lunging, call it | Recall 15% -> 29%, precision -> 58% |
+| Veto | Parry predicted, opponent not attacking, demote | Precision 29% -> 54% |
+| Promote | Parry lost the argmax, opponent clearly lunging, call it | Recall 25% -> 41%, precision 54% -> 56% |
 
-Precision rises while recall doubles because the promoted windows are better than the average parry call: 29 of 45 are true parries. Of those 45, 37 were previously classified as `retreat`. Parrying while retreating is the common case, the legs dominate the pose signal, and the opponent's lunge is what breaks the tie.
+Precision rises while recall grows because the promoted windows are better than the average parry call, not worse. Most of them were previously classified as `retreat`: parrying while retreating is the common case, the legs dominate the pose signal, and the opponent's lunge is what breaks the tie.
+
+Two alternatives were tested against this rule and both lost. Promoting by the model's own parry probability alone, matched on the number of promotions, reaches 36% precision against 49%: the opponent's state is doing the work, not the lower threshold. A dedicated binary parry head, trained on a balanced problem and again matched on promotion count, is worse than the six-way model's own parry probability on all four bouts that have enough parries to measure. The six-way probability appears to encode "parry rather than retreat", which is exactly the comparison the rule needs, and a parry-versus-everything head discards it.
 
 ## Results
 
@@ -73,28 +78,32 @@ All numbers are leave-one-bout-out. The model never trained on the bout it is sc
 | `action_lstm` | Hand-cut clips, mean pooling | 43.4% |
 | `action_cont` | Continuous windows, last pooling | 74.0% |
 | `action_opp` | Plus opponent context | 74.6% |
-| `action_opp5` | Plus a second venue | **76.6%** |
+| `action_opp5` | Plus a second venue | 76.6% |
+| `action_mirror` | Plus a third venue and mirror augmentation | **80.2%** |
 
 Per held-out bout, with the full decision path:
 
 | Bout | Overall | Display accuracy¹ | Parry precision / recall |
 |---|---|---|---|
-| 1 | 76.6% | 83.2% | n/a |
-| 4 | 72.7% | 79.8% | 58% / 29% |
-| 5 (unseen venue) | 59.7% | 67.8% | 29% / 24% |
+| 1 | 80.2% | 81.7% | 25% / 25%² |
+| 4 | 73.4% | 79.0% | 56% / 41% |
+| 5 | 72.0% | 75.8% | 22% / 24% |
+| 7 (unseen venue) | 68.8% | 74.3% | 54% / 18% |
 
 ¹ The overlay renders `neutral` and `walking` identically, as "ready". Display accuracy scores what the viewer sees, so a neutral/walking mix-up is not counted as an error.
 
-**Dataset:** 5 bouts across 2 venues, 1621 seconds of hand-labelled footage, 733 labelled intervals, 8430 training windows. Only 64 seconds are `parry`, which is the main source of difficulty.
+² Bout 1 contains 8 parry windows, too few to mean anything. Bouts 4 and 7 carry 207 and 204.
+
+**Dataset:** 6 bouts across 3 venues, 2446 seconds of hand-labelled footage, 1061 labelled intervals, 12838 training windows. Only 99 seconds are `parry`, which is the main source of difficulty.
 
 ## Evaluation protocol
 
-Ten measured improvements were later retracted during development. The protocol below exists because of them.
+Eleven measured improvements were later retracted during development. The protocol below exists because of them.
 
 - **Leave-one-bout-out, never a random split.** Windows are emitted every 5 frames from a 60-frame span, so adjacent windows share 92% of their frames and a random split reports fiction.
 - **Shuffled control for every new feature.** Adding an input also widens the classifier head, so part of any gain is capacity rather than information. Permuting the new column within each bout and re-running separates the two. Blade energy scored +1.6 points and was positive on both held-out bouts; the shuffled control reproduced the entire effect.
-- **Matched control for every new decision rule.** The parry promoter was scored against a rule promoting the same number of windows by own-probability alone: 37% precision against 58%. Same budget, one variable.
-- **Pre-registered selection rules.** Tuning bout, confirmation bout, criterion and veto are written into the script docstring before it runs.
+- **Matched control for every new decision rule.** The parry promoter was scored against a rule promoting the same number of windows by own-probability alone: 36% precision against 49%. Same budget, one variable.
+- **Pre-registered selection rules.** Tuning bout, confirmation bout, criterion and veto are fixed before the script runs. This is what kept the shipped parry thresholds unchanged when they were re-swept against a new checkpoint: a lower setting won on the tuning bout, then tied on the confirmation bout while costing precision, so it was not adopted.
 - **Absolute correct calls when coverage changes.** Scoring more windows means scoring harder ones. A 720p downscale raised accuracy from 76.6% to 77.7% while losing 2% of correct calls, purely by detecting fencers on fewer frames.
 - **AUC is only valid for the unit it was measured on.** Blade energy separates parry intervals at 0.79 AUC and parry windows at chance, because a 0.6 s action inside a 2 s window mostly reports the window.
 
@@ -115,12 +124,27 @@ Crouch is the strongest feature at the new venue, with a knee-angle gap (18.7°)
 
 The split follows from how the features are built. Posture features use hip-centred, torso-normalised skeletons and are camera-invariant by construction. Motion features use `world_vel = diff(hip_x) - pan/PAN_WIDTH`, where the pan term is an estimate of camera movement. Venue B's camera pans 1.7 times harder than venue A's and is still panning only 16% of the time against 28%.
 
+A third venue then showed that most of what looked like a venue effect was not one. Scoring the two fencers separately instead of scoring the bout as a whole, one of them transferred at 71% while the other collapsed to 35% — and the difference was handedness, not the camera. Mirror augmentation recovered it, and against a control trained on the same doubled window count with identical rather than mirrored copies, mirroring is positive or neutral on every bout for a mean of 7 points. Reporting it against the control matters: on one bout the doubling alone costs 4.3 points and mirroring lands on exactly the same number, so without the control that bout would read as a regression caused by mirroring.
+
+What remains after that is a genuine but cheap domain gap. Training on the first half of an unseen venue and testing on its second half:
+
+| Target footage labelled | Venue C only | Plus the other venues |
+|---|---|---|
+| none | — | 54.1% |
+| 35 s | 44.9% | 63.4% |
+| 78 s | 60.5% | 66.5% |
+| 199 s | 65.5% | 69.5% |
+| 393 s | 68.5% | 69.3% |
+
+Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and the curve is flat past about three minutes. The existing corpus is what makes that work: at the smallest slice, target footage alone reaches 27% while the same slice combined with the other venues reaches 61%. Other venues are a prior, not a substitute. The practical consequence is that deploying at a new venue is a labelling task with a small known price rather than a research problem.
+
 ## Known limitations
 
-1. **Parry recall is 29%.** Precision is acceptable now, but two of every three real parries are still missed.
-2. **Cross-venue accuracy is unmeasured for the shipped model.** The 58.1% figure is historical, from a four-bout model at what was then an unfamiliar venue. That measurement was spent when the venue entered the training set. A third venue is needed for a new one.
+1. **Parry recall is 41%.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one.
+2. **Cross-venue costs 11 points.** 68.8% at an unseen venue against 80.2% at a familiar one. This is now measured rather than estimated, on a third venue held out from training, and roughly a minute of labelled footage from the target venue closes most of it.
 3. **Motion features degrade off-venue.** The fix is a better pan estimate or a camera-invariant reformulation, not more data.
 4. **Broadcast filler is not filtered.** 28% of predictions over replays and crowd shots display a real action. Geometry-based gating caps at 36% precision, because a replay of a touch is geometrically identical to the touch.
+5. **One fencer's rear arm is invisible to the camera.** Where the sword arm is hidden behind the torso, accuracy falls from 81.5% to 47.8% for the same fencer. This is a limit of the camera position rather than of the model, and suppressing predictions when the arm is hidden was tested and does not generalise across bouts.
 
 ## Project structure
 
@@ -132,7 +156,7 @@ fencing/
                evaluate_labels.py, sweep_parry_promote.py,
                venue_motion.py, bout_timeline.py
   data/        raw_video/, labels/ (interval CSVs), train_continuous/ (cached windows)
-  models/      action_opp5.pth (shipped checkpoint)
+  models/      action_mirror.pth (shipped checkpoint)
 ```
 
 ## Built with
