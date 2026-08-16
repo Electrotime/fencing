@@ -1,4 +1,8 @@
-"""Can opponent context RAISE parry recall, not just cut false parries?"""
+"""Can opponent context RAISE parry recall, not just cut false parries?
+
+Re-run 2026-08-16, pre-registered: tune on bout 7, confirm on bout 4, criterion parry F1,
+veto if overall accuracy falls. See CLAUDE.md.
+"""
 import argparse
 import sys
 from pathlib import Path
@@ -16,12 +20,21 @@ LUNGE_I, PARRY_I = CLASS_NAMES.index("lunge"), CLASS_NAMES.index("parry")
 
 # (probability cache, label file, what the model was trained on) -- the third column is
 # the audit trail that says the cache is not circular.
-HELDOUT = {
+PREMIRROR = {
     "4": ("4_probs_heldb5.npz", "bout4_intervals_2track.csv", "verify_h4_b5 (bouts 1,2,3,5)"),
     "5": ("5_probs_held.npz",   "bout5_intervals_2track.csv", "action_opp (bouts 1-4)"),
     "1": ("1_probs_heldb5.npz", "bout1_intervals.csv",        "verify_h1_b5 (bouts 2,3,4,5)"),
     "7": ("7_probs_held.npz",   "bout7_intervals_2track.csv", "verify_h7 (bouts 1-5)"),
 }
+
+# probabilities from mirror-augmented models, matching the shipped checkpoint
+MIRRORED = {
+    "4": ("4_probs_mirror.npz", "bout4_intervals_2track.csv", "verify_mirror_h4 (1,2,3,5,7)"),
+    "5": ("5_probs_mirror.npz", "bout5_intervals_2track.csv", "verify_mirror_h5 (1,2,3,4,7)"),
+    "1": ("1_probs_mirror.npz", "bout1_intervals.csv",        "verify_mirror_h1 (2,3,4,5,7)"),
+    "7": ("7_probs_mirror.npz", "bout7_intervals_2track.csv", "verify_mirror_h7 (bouts 1-5)"),
+}
+HELDOUT = MIRRORED
 
 # shipped gate, mirrored from demo_video so this scores the real starting point
 PARRY_OPP_LUNGE_MIN = 0.20
@@ -151,8 +164,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tune", default="5")
     ap.add_argument("--confirm", default="4")
+    ap.add_argument("--caches", default="mirrored", choices=("mirrored", "premirror"))
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
+    globals()["HELDOUT"] = MIRRORED if a.caches == "mirrored" else PREMIRROR
     if a.self_test:
         _self_test()
         return 0
