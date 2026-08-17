@@ -56,8 +56,7 @@ def clip_dataset_arrays():
 
 
 def train_once(train_ds, weights, epochs, seed, device, pool="mean"):
-    """pool defaults to "mean" to keep older callers byte-identical; the
-    shipped checkpoint uses "last" (see demo_video.POOL_MODE)."""
+    """pool defaults to "mean" to keep older callers byte-identical; the"""
     torch.manual_seed(seed)
     model = ActionLSTM(pool=pool).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
@@ -103,8 +102,7 @@ def evaluate(model, arrs, device, apply_prior=False):
 
 
 def inv_freq_weights(y):
-    """Inverse-frequency weights -- the current recipe. Drives the effective prior
-    to uniform, which is why demo_video has to multiply CLASS_PRIOR back in."""
+    """Inverse-frequency weights -- the current recipe. Drives the effective prior"""
     freq = np.array([max(1, int((y == c).sum())) for c in range(NUM_CLASSES)])
     w = freq.sum() / (NUM_CLASSES * freq)
     return w.astype(np.float32)

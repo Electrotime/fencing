@@ -1,7 +1,4 @@
-"""Binary parry head vs the shipped promoter, coverage-matched.
-
-usage: py -3 scripts/exp_parry_head.py [--seeds 2]
-"""
+"""Binary parry head vs the shipped promoter, coverage-matched."""
 import argparse
 import sys
 from pathlib import Path

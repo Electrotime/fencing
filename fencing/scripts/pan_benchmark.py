@@ -1,7 +1,4 @@
-"""Score camera-pan estimators against known ground truth.
-
-usage: py -3 scripts/pan_benchmark.py [--bouts 4,5] [--samples 150]
-"""
+"""Score camera-pan estimators against known ground truth."""
 import argparse
 import sys
 from pathlib import Path

@@ -1,11 +1,4 @@
-"""Does normalising crouch per video fix cross-venue transfer?
-
-Venue C reads 8-13 deg straighter-kneed on every action class, so an absolute knee
-angle calibrated on venues A/B calls its advances `walking`. Normalising uses only
-the video's own crouch distribution -- no labels, so it is available at inference.
-
-usage: py -3 scripts/exp_crouch_norm.py --holdout 7 [--seeds 4]
-"""
+"""Does normalising crouch per video fix cross-venue transfer?"""
 import argparse
 import sys
 from pathlib import Path

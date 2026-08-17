@@ -41,11 +41,7 @@ def load_truth(path):
 
 
 def window_tensors(track, mot_alt=None):
-    """(flat, agg, n_real) exactly as _classify_window builds them, or None.
-
-    mot_alt gives a second motion track (a different pan estimator) over the same
-    frames; its agg is returned alongside so an A/B needs only one pose pass.
-    """
+    """(flat, agg, n_real, agg_alt) as _classify_window builds them, or None."""
     kp_seq = np.stack(track.kp)[-D.WINDOW_LONG:]
     mot = np.array(track.motion, dtype=np.float32)[-D.WINDOW_LONG:]
     real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)

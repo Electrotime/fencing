@@ -1,12 +1,4 @@
-"""Does mirror augmentation rescue the fencer the model cannot read?
-
-On held-out bout 7 the two fencers score 73.0% and 34.3%, and the failing one has
-normal engineered features but an arm configuration no B-slot fencer in training
-has. The aggregates are mirror-invariant (see exp_mirror), so augmentation only
-flips the pose sequence the LSTM sees.
-
-usage: py -3 scripts/exp_mirror_venue.py [--holdout 7] [--seeds 3]
-"""
+"""Does mirror augmentation rescue the fencer the model cannot read?"""
 import argparse
 import sys
 from pathlib import Path

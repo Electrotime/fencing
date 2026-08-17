@@ -82,8 +82,7 @@ class TwoHeadData(Dataset):
 
 
 class TwoHead(nn.Module):
-    """Shared trunk, two heads. Trunk identical to ActionLSTM so the comparison
-    isolates the head structure rather than capacity."""
+    """Shared trunk, two heads. Trunk identical to ActionLSTM so the comparison"""
 
     def __init__(self, pool="last", n_agg=N_AGG_FEATURES):
         super().__init__()

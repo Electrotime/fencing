@@ -93,8 +93,7 @@ def _normalize(kp: np.ndarray) -> np.ndarray:
 
 
 def _median3(xy: np.ndarray) -> np.ndarray:
-    """3-frame median filter on (n, 33, 2) coordinates. Kills the single-frame
-    teleports the tracker sometimes produces without smearing real motion."""
+    """3-frame median filter on (n, 33, 2) coordinates. Kills the single-frame"""
     if len(xy) < 3:
         return xy
     out = xy.copy()
@@ -211,8 +210,7 @@ def extract_keypoints_and_pan_from_video(video_path: str | Path) -> tuple[np.nda
 
 
 def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
-    """Whole video -> (n, 33, 4) cleaned keypoints. Same as the function above,
-    just without the pan track, for callers that only want the pose."""
+    """Whole video -> (n, 33, 4) cleaned keypoints. Same as the function above,"""
     return extract_keypoints_and_pan_from_video(video_path)[0]
 
 

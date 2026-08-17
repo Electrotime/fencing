@@ -1,7 +1,4 @@
-"""Does adding bout 7 (third venue, 204 parry windows) help? Matched A/B.
-
-usage: py -3 scripts/exp_bout7.py [--holdout 4] [--seeds 4]
-"""
+"""Does adding bout 7 (third venue, 204 parry windows) help? Matched A/B."""
 import argparse
 import sys
 from pathlib import Path

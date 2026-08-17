@@ -1,7 +1,4 @@
-"""Wide pan strips (0.44) vs shipped (0.22), leave-one-bout-out. See CLAUDE.md.
-
-usage: py -3 scripts/exp_wide_pan.py [--seeds 3]
-"""
+"""Wide pan strips (0.44) vs shipped (0.22), leave-one-bout-out. See CLAUDE.md."""
 import argparse
 import sys
 from pathlib import Path

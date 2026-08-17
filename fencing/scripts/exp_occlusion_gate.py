@@ -1,7 +1,4 @@
-"""Is arm visibility a usable abstention signal? Held-out only.
-
-usage: py -3 scripts/exp_occlusion_gate.py
-"""
+"""Is arm visibility a usable abstention signal? Held-out only."""
 import argparse
 import sys
 from pathlib import Path

@@ -16,8 +16,7 @@ DEINTERLACED_SUFFIX = "_deinterlaced"
 
 
 def find_videos(raw_dir: Path) -> list[Path]:
-    """Pick which videos to sample. If a match has a deinterlaced copy, use that
-    and skip the interlaced original so the same match isn't sampled twice."""
+    """Pick which videos to sample. If a match has a deinterlaced copy, use that"""
     all_videos = sorted(raw_dir.glob("*.mp4"))
     have_deinterlaced = {
         v.stem[: -len(DEINTERLACED_SUFFIX)]

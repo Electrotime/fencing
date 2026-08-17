@@ -1,8 +1,4 @@
-"""Can opponent context RAISE parry recall, not just cut false parries?
-
-Re-run 2026-08-16, pre-registered: tune on bout 7, confirm on bout 4, criterion parry F1,
-veto if overall accuracy falls. See CLAUDE.md.
-"""
+"""Can opponent context RAISE parry recall? Protocol in CLAUDE.md."""
 import argparse
 import sys
 from pathlib import Path

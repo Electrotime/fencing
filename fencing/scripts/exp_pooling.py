@@ -20,9 +20,7 @@ VARIANTS = ["mean", "max", "meanmax", "attn", "last"]
 
 
 def time_mask(x, lengths):
-    """(B, T, 1) float mask, 1.0 on real frames. lengths is never None here --
-    extraction always records it, and silently treating None as "all real" is how
-    padding leaks back in."""
+    """(B, T, 1) float mask, 1.0 on real frames. lengths is never None here --"""
     steps = torch.arange(x.shape[1], device=x.device)[None, :]
     return (steps < lengths[:, None].to(x.device)).unsqueeze(-1).to(x.dtype)
 

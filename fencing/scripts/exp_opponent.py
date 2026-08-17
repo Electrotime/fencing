@@ -20,8 +20,7 @@ CONT = PROJECT / "data" / "train_continuous"
 
 
 class WideAggLSTM(nn.Module):
-    """ActionLSTM with a wider agg block. Trunk and pooling identical so the
-    comparison isolates the extra input, not capacity in the recurrent part."""
+    """ActionLSTM with a wider agg block; trunk and pooling identical."""
 
     def __init__(self, n_agg, pool="last"):
         super().__init__()

@@ -1,15 +1,4 @@
-"""How much labelled footage does a NEW venue cost?
-
-Cross-venue transfer sits ~17 points below within-venue, so the practical question
-is how much target-venue labelling closes it. Train on the first N windows of the
-held-out venue and test on its second half, with and without the other venues.
-
-Slices are CONTIGUOUS IN TIME, never random: windows are emitted every 5 frames
-from a 60-frame span, so neighbours share 92% of their frames and a random subset
-leaks the test set.
-
-usage: py -3 scripts/exp_venue_curve.py [--bout 7] [--seeds 3]
-"""
+"""How much labelled footage does a NEW venue cost?"""
 import argparse
 import sys
 from pathlib import Path
