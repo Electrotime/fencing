@@ -26,9 +26,8 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _normalize_sequence)
 from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
 
-# six bouts, three venues, mirror-augmented. Mirroring is worth +7.0 pts mean against
-# a matched duplication control, leave-one-bout-out; see CLAUDE.md.
-MODEL_PATH = PROJECT_ROOT / "models" / "action_mirror.pth"
+# seven bouts, four venues, mirror-augmented; see CLAUDE.md.
+MODEL_PATH = PROJECT_ROOT / "models" / "action_mirror7.pth"
 POOL_MODE = "last"
 USE_OPPONENT = True
 FRAME_MODEL_PATH = PROJECT_ROOT / "models" / "action_frame.pth"  # --frame-model
