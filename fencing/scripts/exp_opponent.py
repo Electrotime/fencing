@@ -64,7 +64,7 @@ def with_opponent(npz_path, key="agg"):
 
 
 def train_eval(X, A, L, Y, ev_X, ev_A, ev_L, ev_Y, n_agg, seeds, epochs, device, pool):
-    accs, recs = [], []
+    accs, recs, precs = [], [], []
     for s in range(seeds):
         torch.manual_seed(42 + s)
         model = WideAggLSTM(n_agg, pool).to(device)
@@ -87,7 +87,10 @@ def train_eval(X, A, L, Y, ev_X, ev_A, ev_L, ev_Y, n_agg, seeds, epochs, device,
         recs.append({CLASS_NAMES[c]: (int(((pred == c) & (ev_Y == c)).sum()) / n
                                       if (n := int((ev_Y == c).sum())) else float("nan"))
                      for c in range(NUM_CLASSES)})
-    return accs, recs
+        precs.append({CLASS_NAMES[c]: (int(((pred == c) & (ev_Y == c)).sum()) / k
+                                       if (k := int((pred == c).sum())) else float("nan"))
+                      for c in range(NUM_CLASSES)})
+    return accs, recs, precs
 
 
 def main() -> int:
@@ -133,8 +136,8 @@ def main() -> int:
              else cat(*[th(k, "lengths") for k in tr]))
         Y = (cat(cY, *[th(k, "y") for k in tr]) if "clips" in name
              else cat(*[th(k, "y") for k in tr]))
-        accs, recs = train_eval(X, A, L, Y, ev["X"], ev_A, ev["lengths"], ev["y"],
-                                n_agg, a.seeds, a.epochs, device, a.pool)
+        accs, recs, _ = train_eval(X, A, L, Y, ev["X"], ev_A, ev["lengths"], ev["y"],
+                                   n_agg, a.seeds, a.epochs, device, a.pool)
         line = f"{name:<26}{np.mean(accs):>8.1%}{np.std(accs):>7.1%}"
         for c in CLASS_NAMES:
             line += f"{np.nanmean([r[c] for r in recs]):>9.0%}"

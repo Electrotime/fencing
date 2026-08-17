@@ -73,7 +73,7 @@ def main() -> int:
                 A = np.concatenate([oA] + ([A] if n else []))
                 L = np.concatenate([oL] + ([L] if n else []))
                 Y = np.concatenate([oY] + ([Y] if n else []))
-            accs, _ = train_eval(X, A, L, Y, *ev, N_AGG_WIDE, a.seeds, a.epochs,
+            accs, _, _ = train_eval(X, A, L, Y, *ev, N_AGG_WIDE, a.seeds, a.epochs,
                                  device, a.pool)
             row += f"{np.mean(accs):>13.1%}±{np.std(accs):.0%}"
         print(row, flush=True)
