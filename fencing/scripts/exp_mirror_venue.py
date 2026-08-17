@@ -20,9 +20,9 @@ from train_continuous import TensorWindows
 CONT = PROJECT / "data" / "train_continuous"
 
 
-def fit(X, A, L, Y, seed, epochs, device, pool):
+def fit(X, A, L, Y, seed, epochs, device, pool, n_agg=N_AGG_WIDE):
     torch.manual_seed(seed)
-    model = WideAggLSTM(N_AGG_WIDE, pool).to(device)
+    model = WideAggLSTM(n_agg, pool).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
     lossf = nn.CrossEntropyLoss()
     dl = DataLoader(TensorWindows(X, A, L, Y), batch_size=32, shuffle=True)
