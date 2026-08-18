@@ -3,7 +3,7 @@
 
 Action recognition for fencing from ordinary broadcast video. FenceVision detects both fencers in a frame and classifies what each one is doing at 20 predictions per second, using only the video feed. No sensors, no instrumented equipment, no marked piste.
 
-Held-out accuracy is 80.2% on a bout the model never trained on, and 68.8% at a venue it has never seen, compared to 16.7% for random guessing.
+Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
 
 ## Features
 
@@ -23,7 +23,7 @@ cd fencing/fencing
 pip install -r requirements.txt
 ```
 
-Python 3.9+ is required. The shipped checkpoint is `models/action_mirror.pth`. Every path
+Python 3.9+ is required. The shipped checkpoint is `models/action_mirror7.pth`. Every path
 below is relative to the inner `fencing/` directory, which is where the package, scripts
 and data live.
 
@@ -81,6 +81,8 @@ All numbers are leave-one-bout-out. The model never trained on the bout it is sc
 | `action_opp5` | Plus a second venue | 76.6% |
 | `action_mirror` | Plus a third venue and mirror augmentation | **80.2%** |
 
+The shipped checkpoint, `action_mirror7`, adds a fourth venue on top of that recipe. It is not in the table because it cannot be scored honestly on any bout in this corpus: all seven are in its training set. Its justification is a matched A/B instead. Adding the seventh bout is worth +6.6, -0.1, +1.1 and +2.4 points on four separately held-out bouts, a mean of +2.5 and never negative beyond seed noise.
+
 Per held-out bout, with the full decision path:
 
 | Bout | Overall | Display accuracy¹ | Parry precision / recall |
@@ -94,7 +96,7 @@ Per held-out bout, with the full decision path:
 
 ² Bout 1 contains 8 parry windows, too few to mean anything. Bouts 4 and 7 carry 207 and 204.
 
-**Dataset:** 6 bouts across 3 venues, 2446 seconds of hand-labelled footage, 1061 labelled intervals, 12838 training windows. Only 99 seconds are `parry`, which is the main source of difficulty.
+**Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
 ## Evaluation protocol
 
@@ -141,7 +143,7 @@ Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and t
 ## Known limitations
 
 1. **Parry recall is 41%.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one.
-2. **Cross-venue costs 11 points.** 68.8% at an unseen venue against 80.2% at a familiar one. This is now measured rather than estimated, on a third venue held out from training, and roughly a minute of labelled footage from the target venue closes most of it.
+2. **Cross-venue costs 6 to 10 points, and the price varies by venue.** Two venues have now been held out from the same training set and scored independently: 66.4% and 70.2%, against 75.5-80.2% on a familiar bout. Roughly a minute of labelled footage from the target venue closes most of the gap. Adding a third venue to training does not improve transfer to a fourth, so venue diversity in training is not the lever.
 3. **Motion features degrade off-venue.** The fix is a better pan estimate or a camera-invariant reformulation, not more data.
 4. **Broadcast filler is not filtered.** 28% of predictions over replays and crowd shots display a real action. Geometry-based gating caps at 36% precision, because a replay of a touch is geometrically identical to the touch.
 5. **One fencer's rear arm is invisible to the camera.** Where the sword arm is hidden behind the torso, accuracy falls from 81.5% to 47.8% for the same fencer. This is a limit of the camera position rather than of the model, and suppressing predictions when the arm is hidden was tested and does not generalise across bouts.
@@ -156,7 +158,7 @@ fencing/
                evaluate_labels.py, sweep_parry_promote.py,
                venue_motion.py, bout_timeline.py
   data/        raw_video/, labels/ (interval CSVs), train_continuous/ (cached windows)
-  models/      action_mirror.pth (shipped checkpoint)
+  models/      action_mirror7.pth (shipped checkpoint)
 ```
 
 ## Built with
