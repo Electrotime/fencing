@@ -56,6 +56,10 @@ PARRY_NEEDS_ATTACKER = True
 PARRY_OPP_LUNGE_MIN = 0.20  # best-or-tied on both bouts; precision is flat 0.2-0.5 on
                             # bout 4 and still rising on bout 5, so this is the safe end
 
+PARRY_DECODER = True          # replaces the veto/promote pair with one linear boundary
+PARRY_W_OWN = 5.0858          # logistic fit on both fencers' probabilities, all cached bouts
+PARRY_W_OPP = 4.0640
+PARRY_LINE_MIN = 3.2708       # at opp_lunge 0.60 this wants p_parry 0.164, vs the old 0.15
 PARRY_PROMOTE = True
 PARRY_PROMOTE_MIN = 0.15      # own parry probability, chosen on bout 5, confirmed on 4
 PARRY_PROMOTE_OPP_MIN = 0.60  # opponent lunge -- far above the veto's 0.20, because
@@ -234,6 +238,18 @@ def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
         fw_name = CLASS_NAMES[fw_i]
         fw_conf = float(track.probs[fw_i] / rest) if rest > 1e-6 else 0.0
 
+        if PARRY_DECODER:
+            # one line replaces the veto/promote pair; see CLAUDE.md for the control
+            fires = (PARRY_W_OWN * float(track.probs[parry_i])
+                     + PARRY_W_OPP * opp_attack) >= PARRY_LINE_MIN
+            if fires:
+                track.footwork, track.footwork_conf = fw_name, fw_conf
+                track.label, track.conf = "parry", float(track.probs[parry_i])
+            elif track.label == "parry":
+                track.label, track.conf = fw_name, float(alt[fw_i])
+                track.footwork, track.footwork_conf = None, 0.0
+            continue
+
         if track.label == "parry":
             track.footwork, track.footwork_conf = fw_name, fw_conf
             if not PARRY_NEEDS_ATTACKER:
@@ -274,12 +290,19 @@ def _self_test_parry_gate() -> None:
     _apply_parry_gate(tr)
     assert tr["A"].label == "parry", tr["A"].label
 
-    # opponent NOT attacking -> parry demoted to its own runner-up
+    # opponent NOT attacking, ordinary parry evidence -> demoted to its own runner-up
     tr = {"A": mk("parry", probs(parry=0.6, retreat=0.3)),
           "B": mk("neutral", probs(neutral=0.9, lunge=0.02))}
     _apply_parry_gate(tr)
     assert tr["A"].label == "retreat", tr["A"].label
     assert abs(tr["A"].conf - 0.3) < 1e-5
+
+    # the other case the rectangle could not express: opponent quiet, but the parry
+    # evidence is overwhelming. The veto refused it outright; the line lets it through.
+    tr = {"A": mk("parry", probs(parry=0.95, retreat=0.02)),
+          "B": mk("neutral", probs(neutral=0.9, lunge=0.0))}
+    _apply_parry_gate(tr)
+    assert tr["A"].label == ("parry" if PARRY_DECODER else "retreat"), tr["A"].label
 
     # a NON-parry label is never touched, however quiet the opponent
     tr = {"A": mk("lunge", probs(lunge=0.7)),
@@ -322,12 +345,13 @@ def _self_test_parry_gate() -> None:
     _apply_parry_gate(tr)
     assert tr["A"].label == "retreat" and tr["A"].footwork is None, vars(tr["A"])
 
-    # own parry probability below PARRY_PROMOTE_MIN -> not promoted however hard the
-    # opponent attacks. Context alone must never manufacture a parry.
+    # a hard opponent lunge with weak own evidence. The rectangle refused this on
+    # principle; measured, such windows are parries 42% of the time (8-18x base on
+    # every bout), so the line fires and the old invariant is retired.
     tr = {"A": mk("retreat", probs(retreat=0.7, parry=0.10)),
           "B": mk("lunge", probs(lunge=0.95))}
     _apply_parry_gate(tr)
-    assert tr["A"].label == "retreat", tr["A"].label
+    assert tr["A"].label == ("parry" if PARRY_DECODER else "retreat"), tr["A"].label
 
     tr = {"A": mk("parry", probs(parry=0.6, retreat=0.3)),
           "B": mk("neutral", probs(neutral=0.9, lunge=0.0))}
@@ -344,7 +368,9 @@ def _self_test_parry_gate() -> None:
           "B": mk("lunge", probs(lunge=0.8))}
     _apply_parry_gate(tr)
     assert tr["A"].footwork == "retreat"
+    # quiet the opponent too, so this isolates stale-field clearing from the rule
     tr["A"].label, tr["A"].probs = "advance", probs(advance=0.9)
+    tr["B"].probs = probs(neutral=0.9, lunge=0.0)
     _apply_parry_gate(tr)
     assert tr["A"].footwork is None, "stale footwork survived into a non-parry frame"
 
