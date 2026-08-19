@@ -1,0 +1,13 @@
+# Touch outcomes for data/raw_video/6.mp4 (FOCONI vs MASSIALAS, Paris 2025). FOIL.
+#
+# ONE ROW PER HALT that ends a fencing phrase -- including halts that award nothing.
+#   time    when the action STOPS (lights / halt). +-0.5s is fine.
+#   scorer  left | right | none   -- read it off the SCOREBOARD, never judge priority:
+#           if a number went up, that fencer scored; if neither moved, `none`.
+#   score   running score AFTER the call, e.g. 3-2. This is the checksum that catches
+#           a missed row, so please fill it.
+#   note    optional. `off_target`, `simul`, or `reversed` if video review overturned it.
+#
+# SKIP halts that are not a phrase outcome: equipment, timeout, cards, wire repairs.
+# Validate: py -3 scripts/check_touches.py data/labels/bout6_touches.csv
+time,scorer,score,note
