@@ -1,0 +1,5 @@
+# Touch outcomes for data/raw_video/4.mp4 (26.1 min). FOIL.
+# One row per halt. Score blank = nothing awarded. Side = who LANDED the hit,
+# so a valid/Both row with no score movement is a double, i.e. scorer none.
+# Skip stoppages that are not a phrase outcome: equipment, timeout, cards.
+Score	Time stamp	Hit	Side conduct hit
