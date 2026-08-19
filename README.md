@@ -10,7 +10,7 @@ Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at v
 - Six-class action recognition: `advance`, `retreat`, `walking`, `neutral`, `lunge`, `parry`
 - Simultaneous footwork and blade output, so a parry during a retreat is reported as both
 - Opponent-aware classification: each fencer's features include their opponent's
-- Rule-based parry gating that raises parry precision from 29% to 56%
+- A learned two-term decision rule for parry, worth +13 points of recall at unchanged overall accuracy
 - Mirror augmentation for left- and right-handed fencers, worth 7 points against a matched control
 - Annotated video output with per-fencer overlays
 - Leave-one-bout-out evaluation scripts and per-feature ablation controls
@@ -58,14 +58,25 @@ A fourth, added later, is mirror augmentation. Normalisation already removes tra
 
 Parry is the hardest class: brief, small, and physically overlapping with footwork. The raw classifier ran at 29% precision, which makes an on-screen indicator worse than useless.
 
-Across bouts 3 to 5, 86% of labelled parries have the opponent attacking at the same moment (76% lunging, 10% advancing with an extension). Both directions of that correlation are used:
+Across bouts 3 to 5, 86% of labelled parries have the opponent attacking at the same moment (76% lunging, 10% advancing with an extension). That asymmetry is what makes the opponent's state usable: a parry is a response and barely happens unattacked, while a lunge only draws one about half the time. So the rule runs one way — the opponent's attack conditions parry, never the reverse.
 
-| Rule | Condition | Effect on held-out bout 4 |
+The model is not blind to parry. Its parry probability separates parry windows at 0.82 to 0.88 AUC, so the ranking is good and the difficulty is extracting it at a 4% base rate. What changed the result was the *shape* of the decision rule.
+
+The first version was a rectangle: call it a parry when the model's own parry probability clears one threshold **and** the opponent's lunge probability clears another. Both conditions had to hold independently. Replacing that with a single linear boundary, fitted on the same two numbers, lets them trade off — overwhelming parry evidence can carry a quiet opponent, and a committed attack can carry weak parry evidence:
+
+    5.0858 * p_parry  +  4.0640 * opponent_lunge  >=  3.2708
+
+| Rule | Held-out bout 4 | Mean over four held-out bouts |
 |---|---|---|
-| Veto | Parry predicted, opponent not attacking, demote | Precision 29% -> 54% |
-| Promote | Parry lost the argmax, opponent clearly lunging, call it | Recall 25% -> 41%, precision 54% -> 56% |
+| Raw classifier, no rule | 39% precision / 30% recall | 0.24 F1 |
+| Rectangle (two thresholds) | 56% / 41% | 0.31 F1 |
+| **Linear boundary** | **50% / 52%** | **0.38 F1** |
 
-Precision rises while recall grows because the promoted windows are better than the average parry call, not worse. Most of them were previously classified as `retreat`: parrying while retreating is the common case, the legs dominate the pose signal, and the opponent's lunge is what breaks the tie.
+Parry F1 improves on all four bouts and overall accuracy is unchanged. The line passes almost exactly through the hand-tuned corner — at an opponent lunge of 0.60 it wants a parry probability of 0.164, against the 0.15 that was chosen by hand — so the old thresholds were a good point on a shape that simply could not express a trade-off.
+
+The promoted windows are better than the average parry call, not worse. Most were previously classified as `retreat`: parrying while retreating is the common case, the legs dominate the pose signal, and the opponent's lunge is what breaks the tie.
+
+Re-tuning the rectangle's two thresholds instead, chosen the same leave-one-bout-out way, gains nothing at all — 0.31 F1, identical to the shipped pair. So the improvement is the shape of the rule, not fresher numbers. Adding all twelve class probabilities, or lagged opponent history, does not beat the two features the rule already uses.
 
 Two alternatives were tested against this rule and both lost. Promoting by the model's own parry probability alone, matched on the number of promotions, reaches 36% precision against 49%: the opponent's state is doing the work, not the lower threshold. A dedicated binary parry head, trained on a balanced problem and again matched on promotion count, is worse than the six-way model's own parry probability on all four bouts that have enough parries to measure. The six-way probability appears to encode "parry rather than retreat", which is exactly the comparison the rule needs, and a parry-versus-everything head discards it.
 
@@ -88,9 +99,10 @@ Per held-out bout, with the full decision path:
 | Bout | Overall | Display accuracy¹ | Parry precision / recall |
 |---|---|---|---|
 | 1 | 80.2% | 81.7% | 25% / 25%² |
-| 4 | 73.4% | 79.0% | 56% / 41% |
-| 5 | 72.0% | 75.8% | 22% / 24% |
-| 7 (unseen venue) | 68.8% | 74.3% | 54% / 18% |
+| 4 | 73.4% | 79.0% | 50% / 52% |
+| 5 | 71.8% | 75.8% | 25% / 43% |
+| 6 (unseen venue) | 73.7% | — | 36% / 26% |
+| 7 (unseen venue) | 69.1% | 74.3% | 51% / 30% |
 
 ¹ The overlay renders `neutral` and `walking` identically, as "ready". Display accuracy scores what the viewer sees, so a neutral/walking mix-up is not counted as an error.
 
@@ -142,7 +154,7 @@ Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and t
 
 ## Known limitations
 
-1. **Parry recall is 41%.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one.
+1. **Parry recall is 26 to 52% depending on the bout.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one.
 2. **Cross-venue costs 6 to 10 points, and the price varies by venue.** Two venues have now been held out from the same training set and scored independently: 66.4% and 70.2%, against 75.5-80.2% on a familiar bout. Roughly a minute of labelled footage from the target venue closes most of the gap. Adding a third venue to training does not improve transfer to a fourth, so venue diversity in training is not the lever.
 3. **Motion features degrade off-venue.** The fix is a better pan estimate or a camera-invariant reformulation, not more data.
 4. **Broadcast filler is not filtered.** 28% of predictions over replays and crowd shots display a real action. Geometry-based gating caps at 36% precision, because a replay of a touch is geometrically identical to the touch.

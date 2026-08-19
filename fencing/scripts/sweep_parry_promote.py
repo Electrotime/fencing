@@ -29,6 +29,7 @@ MIRRORED = {
     "5": ("5_probs_mirror.npz", "bout5_intervals_2track.csv", "verify_mirror_h5 (1,2,3,4,7)"),
     "1": ("1_probs_mirror.npz", "bout1_intervals.csv",        "verify_mirror_h1 (2,3,4,5,7)"),
     "7": ("7_probs_mirror.npz", "bout7_intervals_2track.csv", "verify_mirror_h7 (bouts 1-5)"),
+    "6": ("6_probs_mirror.npz", "bout6_intervals_2track.csv", "verify_m7_h6 (1,2,3,4,5,7)"),
 }
 HELDOUT = MIRRORED
 
