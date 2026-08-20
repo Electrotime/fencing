@@ -20,9 +20,12 @@ LAYOUT = {
     "7": dict(anchor=(600, 566, 696, 618),
               wide=dict(left=(470, 560, 562, 620), right=(726, 560, 814, 620)),
               digits=dict(left=(30, 12, 80, 52), right=(12, 12, 78, 52)),
-              lamp=dict(left=(470, 560, 562, 620), right=(726, 560, 814, 620))),
+              lamp=dict(left=(470, 560, 562, 620), right=(726, 560, 814, 620),
+                        left_white=(440, 620, 545, 631),
+                        right_white=(740, 620, 845, 631))),
     # bout 4 lamp boxes were located by contrasting frames at labelled halts against
     # the rest of the video, not by eye: red peaked at (794, 908), green at (1226, 908).
+    # bout 4 shows off-target as WHITE in the same lamp, so no separate box.
     "4": dict(lamp=dict(left=(760, 890, 830, 926), right=(1192, 890, 1262, 926))),
 }
 
@@ -72,13 +75,15 @@ def lamp_series(video, boxes, stride=0.1, cache=None):
     """Per-side redness, greenness and whiteness of the lamp indicator over time."""
     if cache and Path(cache).exists():
         d = np.load(cache)
-        return d["t"], {s: {k: d[f"{s}_{k}"] for k in ("red", "green", "white")}
+        return d["t"], {s: {k: d[f"{s}_{k}"] for k in
+                            ("red", "green", "white", "wmean")}
                         for s in boxes}
 
     cap = cv2.VideoCapture(str(video))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     step = max(1, int(round(fps * stride)))
-    times, acc, i = [], {s: {k: [] for k in ("red", "green", "white")} for s in boxes}, 0
+    times, acc, i = [], {s: {k: [] for k in ("red", "green", "white", "wmean")}
+                         for s in boxes}, 0
     while True:
         if not cap.grab():
             break
@@ -90,7 +95,9 @@ def lamp_series(video, boxes, stride=0.1, cache=None):
                     B, G, R = c[:, :, 0], c[:, :, 1], c[:, :, 2]
                     acc[s]["red"].append(np.percentile(R - np.maximum(G, B), 99))
                     acc[s]["green"].append(np.percentile(G - np.maximum(R, B), 99))
-                    acc[s]["white"].append(np.percentile(np.minimum(np.minimum(B, G), R), 99))
+                    mn = np.minimum(np.minimum(B, G), R)
+                    acc[s]["white"].append(np.percentile(mn, 99))
+                    acc[s]["wmean"].append(mn.mean())
                 times.append(i / fps)
         i += 1
     cap.release()
@@ -126,6 +133,71 @@ def lamps_at(t, series, t0, thr, lo=-0.3, hi=2.0):
     if lit["right"]:
         return "right", pk
     return "none", pk
+
+
+def lamp_states(t, series, t0, thr, lo=-0.3, hi=2.0):
+    """Per-side lamp state at one halt: colour / white / off.
+
+    Foil shows an off-target hit as a WHITE lamp. Where the broadcast gives it its own
+    indicator (bout 7, a bar under the name plate) it needs its own box; where the lamp
+    just changes colour (bout 4) the same box serves both.
+    """
+    m = (t >= t0 + lo) & (t <= t0 + hi)
+    if not m.any():
+        return {"left": "off", "right": "off"}
+    out = {}
+    for s in ("left", "right"):
+        col = float(series[s]["red" if s == "left" else "green"][m].max())
+        wbox = series.get(f"{s}_white", series[s])
+        wht = float(wbox["wmean"][m].max())
+        out[s] = ("colour" if col > thr["colour"][s]
+                  else "white" if wht > thr["white"][s] else "off")
+    return out
+
+
+def lamp_kind(states):
+    """The taxonomy that decides whether the model is needed at all."""
+    v = sorted(states.values())
+    if v == ["colour", "colour"]:
+        return "two_colour"          # priority picks a side
+    if v == ["colour", "white"]:
+        return "mixed"               # priority scores the valid hit or annuls it
+    if v.count("colour") == 1:
+        return "one_colour"          # no contest, that side scores
+    if "white" in v:
+        return "white_only"          # nothing scored
+    return "none"
+
+
+def priority_from(states, scorer):
+    """Which fencer held priority, from the lamps plus what was awarded.
+
+    One target unifies both contested cases. Two colours: the award names the
+    priority holder. Colour plus white: if the valid hit scored its owner had
+    priority, and if nothing scored the off-target fencer did -- which turns an
+    annulled halt from a discarded `none` into a labelled example.
+    Returns None where priority does not apply or cannot be inferred.
+    """
+    kind = lamp_kind(states)
+    if kind == "two_colour":
+        return scorer if scorer in ("left", "right") else None
+    if kind == "mixed":
+        col = next(s for s, v in states.items() if v == "colour")
+        wht = next(s for s, v in states.items() if v == "white")
+        if scorer == col:
+            return col
+        if scorer == "none":
+            return wht
+    return None
+
+
+def lamp_all_thresholds(series):
+    return {
+        "colour": {s: lamp_threshold(series[s]["red" if s == "left" else "green"])
+                   for s in ("left", "right")},
+        "white": {s: lamp_threshold(series.get(f"{s}_white", series[s])["wmean"])
+                  for s in ("left", "right")},
+    }
 
 
 def otsu(x, bins=256):
