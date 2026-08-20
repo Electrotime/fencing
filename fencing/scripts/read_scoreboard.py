@@ -19,8 +19,19 @@ LAB = PROJECT / "data" / "labels"
 LAYOUT = {
     "7": dict(anchor=(600, 566, 696, 618),
               wide=dict(left=(470, 560, 562, 620), right=(726, 560, 814, 620)),
-              digits=dict(left=(30, 12, 80, 52), right=(12, 12, 78, 52))),
+              digits=dict(left=(30, 12, 80, 52), right=(12, 12, 78, 52)),
+              lamp=dict(left=(470, 560, 562, 620), right=(726, 560, 814, 620))),
+    # bout 4 lamp boxes were located by contrasting frames at labelled halts against
+    # the rest of the video, not by eye: red peaked at (794, 908), green at (1226, 908).
+    "4": dict(lamp=dict(left=(760, 890, 830, 926), right=(1192, 890, 1262, 926))),
 }
+
+# Lamp brightness does NOT transfer between broadcasts -- bout 7 peaks near 230 over a
+# baseline of 2, bout 4 near 100 over 15 -- so the threshold is derived per series.
+# Lamps are lit a few percent of the time, so the top of the range is the lit state.
+def lamp_threshold(v, frac=0.5):
+    lo, hi = np.percentile(v, [50, 99.5])
+    return lo + frac * (hi - lo)
 
 # The pill border glows with the lamp colour, which is bright in grayscale and would
 # read as a score change. Digits are white and the glow is saturated, so everything
@@ -55,6 +66,66 @@ def sample(video, boxes, stride, cache=None):
     if cache:
         np.savez_compressed(cache, t=t, fps=fps, **out)
     return t, out, fps
+
+
+def lamp_series(video, boxes, stride=0.1, cache=None):
+    """Per-side redness, greenness and whiteness of the lamp indicator over time."""
+    if cache and Path(cache).exists():
+        d = np.load(cache)
+        return d["t"], {s: {k: d[f"{s}_{k}"] for k in ("red", "green", "white")}
+                        for s in boxes}
+
+    cap = cv2.VideoCapture(str(video))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    step = max(1, int(round(fps * stride)))
+    times, acc, i = [], {s: {k: [] for k in ("red", "green", "white")} for s in boxes}, 0
+    while True:
+        if not cap.grab():
+            break
+        if i % step == 0:
+            ok, f = cap.retrieve()
+            if ok:
+                for s, b in boxes.items():
+                    c = f[b[1]:b[3], b[0]:b[2]].astype(np.int16)
+                    B, G, R = c[:, :, 0], c[:, :, 1], c[:, :, 2]
+                    acc[s]["red"].append(np.percentile(R - np.maximum(G, B), 99))
+                    acc[s]["green"].append(np.percentile(G - np.maximum(R, B), 99))
+                    acc[s]["white"].append(np.percentile(np.minimum(np.minimum(B, G), R), 99))
+                times.append(i / fps)
+        i += 1
+    cap.release()
+    t = np.array(times, dtype=np.float32)
+    out = {s: {k: np.array(v, dtype=np.float32) for k, v in d.items()} for s, d in acc.items()}
+    if cache:
+        np.savez_compressed(cache, t=t,
+                            **{f"{s}_{k}": v for s, d in out.items() for k, v in d.items()})
+    return t, out
+
+
+def lamp_thresholds(series):
+    return {s: lamp_threshold(d["red" if s == "left" else "green"])
+            for s, d in series.items()}
+
+
+def lamps_at(t, series, t0, thr, lo=-0.3, hi=2.0):
+    """Which lamps fired at one halt: left / right / both / none.
+
+    `none` means no coloured lamp, which in foil is an off-target (white) hit. The
+    white channel is NOT used for that -- it rises at every halt in some broadcasts,
+    marking the stoppage rather than the kind of hit.
+    """
+    m = (t >= t0 + lo) & (t <= t0 + hi)
+    if not m.any():
+        return "none", {}
+    pk = {s: {k: float(v[m].max()) for k, v in d.items()} for s, d in series.items()}
+    lit = {s: pk[s]["red" if s == "left" else "green"] > thr[s] for s in series}
+    if lit["left"] and lit["right"]:
+        return "both", pk
+    if lit["left"]:
+        return "left", pk
+    if lit["right"]:
+        return "right", pk
+    return "none", pk
 
 
 def otsu(x, bins=256):

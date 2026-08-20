@@ -1,5 +1,65 @@
-# Touch outcomes for data/raw_video/4.mp4 (26.1 min). FOIL.
-# One row per halt. Score blank = nothing awarded. Side = who LANDED the hit,
-# so a valid/Both row with no score movement is a double, i.e. scorer none.
-# Skip stoppages that are not a phrase outcome: equipment, timeout, cards.
-Score	Time stamp	Hit	Side conduct hit
+# Touch outcomes for data/raw_video/4.mp4. Aaron, 2026-08-20. FOIL, TEAM relay
+# (JPN vs USA bronze medal match) -- score is the CUMULATIVE team score, so it
+# starts partway through and the fencers change between legs.
+# Score blank = nothing awarded. Side = who LANDED the hit.
+Score	Time stamp	Hit	Side registered
+15:20	00:06.900	valid	left
+15:21	00:30.700	valid	right
+15:22	00:44.866	valid	right
+15:24	02:34.100	valid	right
+17:25	04:42.666	valid	left
+	05:22.700	offtarget	right
+17:26	05:34.100	valid	right
+	05:44.700	offtarget	right
+17:27	06:00.467	valid	right
+18:27	06:20.900	valid	left
+19:28	06:53.234	valid	left
+19:29	07:06.933	valid	right
+20:29	07:28.333	valid	left
+	07:44.000	offtarget	left
+20:30	08:03.533	valid	right
+20:31	08:54.100	valid	right
+	09:17.300	offtarget	left
+21:31	09:55.767	valid	left
+21:32	10:21.966	valid	right
+	10:32.166	offtarget	right
+	11:15.966	offtarget	left
+22:32	11:47.366	valid	left
+23:32	12:06.533	valid	left
+	12:53.733	offtarget	right
+23:33	13:04.367	valid	right
+23:34	13:44.100	valid	right
+24:34	14:06.666	valid	left
+25:34	14:30.300	valid	left
+	14:40.100	offtarget	right
+	14:50.600	offtarget	right
+	14:57.666	valid	both
+25:35	16:00.633	valid	right
+	17:13.667	offtarget	right
+	17:28.800	offtarget	right
+	17:38.567	offtarget	right
+25:36	17:53.267	valid	right
+26:36	18:12.100	valid	left
+	18:34.366	offtarget	left
+26:37	18:48.933	valid	right
+26:38	19:11.466	valid	right
+	19:22.600	offtarget	right
+	20:09.300	offtarget	right
+	20:21.733	offtarget	left
+26:39	20:29.801	valid	right
+26:40	20:51.200	valid	right
+26:41	21:42.166	valid	right
+	22:09.200	offtarget	right
+27:41	22:18.533	valid	left
+	22:31.900	offtarget	left
+27:42	22:41.733	valid	right
+	22:58.166	offtarget	left
+	23:09.866	offtarget	right
+	23:38.400	offtarget	left
+27:43	23:49.099	valid	right
+	24:40.633	offtarget	left
+	24:52.400	offtarget	left
+	24:58.900	offtarget	left
+27:44	25:11.633	valid	right
+28:44	25:33.066	valid	left
+28:45	25:44.500	valid	right

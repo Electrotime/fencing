@@ -14,7 +14,8 @@ SCORE = re.compile(r"^(\d+)\s*[-:]\s*(\d+)$")
 BOTH = {"both", "simul", "simultaneous", "double"}
 ALIAS = {"time": "time", "time stamp": "time", "timestamp": "time",
          "score": "score", "hit": "hit", "note": "note", "scorer": "scorer",
-         "side": "side", "side conduct hit": "side", "side conducting hit": "side"}
+         "side": "side", "side conduct hit": "side", "side conducting hit": "side",
+         "side registered": "side"}
 
 
 def parse_time(s):
@@ -87,9 +88,12 @@ def check(path):
         d = (s[0] - prev[0], s[1] - prev[1])
         won = {(0, 0): "none", (1, 0): "left", (0, 1): "right"}.get(d)
         if won is None:
+            # a gap means a NEIGHBOURING row is missing, not that this one scored
+            # nothing, so fall back to the directly observed side column
+            won = r["side"] if r["side"] in ("left", "right") else "none"
             problems.append((r["line"], f"score {s[0]}-{s[1]} after {prev[0]}-{prev[1]} moves "
-                                        f"by {d}; a row is probably missing"))
-            won = "none"
+                                        f"by {d}; a row is probably missing "
+                                        f"(this row scored to {won!r} from the side column)"))
         elif r["side"] and won in ("left", "right") and r["side"] != won:
             problems.append((r["line"], f"score advanced for {won} but the side column "
                                         f"says {r['side']!r}"))

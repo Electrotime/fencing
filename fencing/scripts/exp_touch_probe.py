@@ -11,16 +11,29 @@ sys.path.insert(0, str(PROJECT / "scripts"))
 
 from src.action_model import CLASS_NAMES
 import check_touches as CT
+import read_scoreboard as RS
 
 LAB = PROJECT / "data" / "labels"
 CACHE = {"7": "7_probs_mirror.npz", "4": "4_probs_mirror.npz"}
 BACKS = (1.0, 2.0, 3.0, 4.0)
 POOLS = ("max", "mean")
 
-# Pre-registered on bout 7, 2026-08-19, BEFORE bout 4 was labelled. One feature,
-# one-sided (A advances more -> left scores). Confirm on bout 4 only. See CLAUDE.md.
-PREREG = "advance max (A-B) @1s"
-SELECTED_ON = "7"
+# FAILED on bout 4, 2026-08-20: AUC 0.52, one-sided p 0.42. Kept as the record.
+DEAD_PREREG = "advance max (A-B) @1s"
+
+# Replacement, registered 2026-08-20 on bouts 4+7, to be tested on 5 or 6. Averaging
+# every lookback removes the choice that killed the first one -- advance led both
+# searches but peaked at 1s on bout 7 and 4s on bout 4.
+PREREG = "advance max (A-B) mean-lookback"
+SELECTED_ON = ("7", "4")
+
+# Registered 2026-08-20 on bouts 4+7. Foil priority goes to whoever was attacking,
+# so two-lamp touches are the ones a pose feature could decide; single-lamp touches
+# mix counter-attacks, ripostes and lines, and showed nothing (AUC 0.57).
+PREREG_LIGHTS = "both"
+
+# incompleteness, not bad rows: the surviving rows stay usable
+ADVISORY = ("checksum cannot run", "checksum seeded from here", "a row is probably missing")
 
 
 def ranks(x):
@@ -80,14 +93,29 @@ def pooled(d, t, back, lead):
     return out
 
 
+def lights_for(stem, times):
+    """left / right / both / none per halt, read off the lamp indicator."""
+    lay = RS.LAYOUT.get(stem, {})
+    cache = LAB / f"{stem}_lamp.npz"
+    if "lamp" not in lay or not cache.exists():
+        return np.array(["?"] * len(times))
+    t, ser = RS.lamp_series("", lay["lamp"], 0.1, cache)
+    thr = RS.lamp_thresholds(ser)
+    return np.array([RS.lamps_at(t, ser, u, thr)[0] for u in times])
+
+
 def load(stem):
     src = LAB / f"bout{stem}_touches.tsv"
     if not src.exists():
         src = LAB / f"bout{stem}_touches.csv"
     problems, rows = CT.check(src)
-    hard = [m for _, m in problems if "checksum cannot run" not in m]
+    hard = [m for _, m in problems if not any(k in m for k in ADVISORY)]
     if hard:
         raise SystemExit(f"{src.name} has unresolved problems: {hard}")
+    advisory = len(problems) - len(hard)
+    if advisory:
+        print(f"  ({advisory} advisory: halts known missing, so this bout is "
+              f"incomplete but not wrong)")
     return src, [(r["t"], r["scorer"]) for r in rows]
 
 
@@ -104,6 +132,9 @@ def build(T, D, lead):
                 X.append(np.array([f["A"][pi][ci] - f["B"][pi][ci]
                                    for f, k in zip(feats[b], ok) if k]))
                 names.append(f"{cname} {pname} (A-B) @{b:.0f}s")
+    adv = [i for i, nm in enumerate(names) if nm.startswith("advance max")]
+    X.append(np.mean([X[i] for i in adv], axis=0))
+    names.append("advance max (A-B) mean-lookback")
     return np.stack(X), names, ok
 
 
@@ -113,6 +144,7 @@ def main() -> int:
     ap.add_argument("--perm", type=int, default=20000)
     ap.add_argument("--lead", type=float, default=0.3)
     ap.add_argument("--show", type=int, default=8)
+    ap.add_argument("--lights", default="all", choices=("all", "both", "single"))
     ap.add_argument("--prereg", action="store_true",
                     help="test only the pre-registered feature, one-sided")
     a = ap.parse_args()
@@ -126,6 +158,8 @@ def main() -> int:
             T.append((stem, t, sc))
             D.append(d)
 
+    LIGHTS = np.concatenate([lights_for(b, [u for bb, u, _ in T if bb == b])
+                             for b in dict.fromkeys(b for b, _, _ in T)])
     labels = np.array([sc for _, _, sc in T])
     print(f"  left {(labels == 'left').sum()}  right {(labels == 'right').sum()}  "
           f"none {(labels == 'none').sum()}")
@@ -135,22 +169,37 @@ def main() -> int:
     Xd = X[:, (labels[ok] != "none")]
     y = labels[dec] == "left"
 
+    if a.lights != "all":
+        want = {"both": {"both"}, "single": {"left", "right"}}[a.lights]
+        keep_l = np.array([l in want for l in LIGHTS])
+        dec = dec & keep_l
+        Xd = X[:, (labels[ok] != "none") & keep_l[ok]]
+        y = labels[dec] == "left"
+        print(f"  restricted to {a.lights}-lamp halts: {dec.sum()} decided")
+
     if a.prereg:
         i = names.index(PREREG)
         v = auc(Xd[i], y)
         _, pf, _ = maxstat_p(Xd[i:i + 1], y, a.perm)
         one_sided = pf[0] / 2 if v > 0.5 else 1.0 - pf[0] / 2
-        print(f"\n=== PRE-REGISTERED: {PREREG}, one-sided, "
-              f"{dec.sum()} decided touches ===")
+        if a.lights != PREREG_LIGHTS:
+            print(f"  NOTE: registered subset is --lights {PREREG_LIGHTS}, "
+                  f"running --lights {a.lights}")
+        print()
+        print(f"=== PRE-REGISTERED: {PREREG} on {a.lights}-lamp halts, "
+              f"one-sided, {dec.sum()} decided touches ===")
         print(f"  AUC {v:.2f}   one-sided p {one_sided:.4f}")
-        if SELECTED_ON in a.bouts.split(","):
-            print(f"  CIRCULAR -- bout {SELECTED_ON} is where this feature was chosen. "
-                  f"This is not\n  a confirmation at any p value. Run on a bout held out "
-                  f"from the search.")
+        overlap = sorted(set(SELECTED_ON) & set(a.bouts.split(",")))
+        if overlap:
+            print(f"  CIRCULAR -- bout(s) {','.join(overlap)} are where this "
+                  f"feature was chosen. This is not a confirmation at any p "
+                  f"value. Run on a bout held out from the search.")
             return 1
         print("  VERDICT: " + ("confirmed" if one_sided < 0.05 else "not confirmed"))
         return 0
 
+    keep = [k for k, nm in enumerate(names) if "mean-lookback" not in nm]
+    Xd, X, names = Xd[keep], X[keep], [names[k] for k in keep]
     print(f"\n=== LEFT vs RIGHT: {len(names)} features, {dec.sum()} decided touches "
           f"({y.sum()} left / {(~y).sum()} right) ===")
     obs, pf, fam = maxstat_p(Xd, y, a.perm)
