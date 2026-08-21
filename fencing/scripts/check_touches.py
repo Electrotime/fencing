@@ -15,7 +15,8 @@ BOTH = {"both", "simul", "simultaneous", "double"}
 ALIAS = {"time": "time", "time stamp": "time", "timestamp": "time",
          "score": "score", "hit": "hit", "note": "note", "scorer": "scorer",
          "side": "side", "side conduct hit": "side", "side conducting hit": "side",
-         "side registered": "side"}
+         "side registered": "side", "touch": "hit",
+         "side for touch": "side"}
 
 
 def parse_time(s):

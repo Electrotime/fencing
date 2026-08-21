@@ -1,0 +1,27 @@
+# Touch outcomes for data/raw_video/5.mp4. Aaron, 2026-08-21. FOIL, individual DE.
+# Score blank = nothing awarded. Side = who LANDED the hit.
+Score	Time stamp	Touch	Side for touch
+0:0	00:11.033	off target	right
+0:1	00:20.900	valid	right
+0:2	00:41.000	valid	right
+0:3	01:10.133	valid	right
+0:4	01:26.666	valid	right
+1:4	02:29.866	valid	left
+1:5	02:47.100	valid	right
+1:6	03:06.400	valid	right
+	03:27.500	off target	left
+2:6	03:44.600	valid	left
+	04:05.600	off target	left
+3:6	04:25.600	valid	left
+3:7	04:43.500	valid	right
+4:7	05:16.533	valid	left
+4:8	05:46.200	valid	right
+5:8	06:28.833	valid	left
+5:9	06:55.500	valid	right
+5:10	07:12.600	valid	right
+5:11	07:28.200	valid	right
+	07:43.100	off target	left
+5:12	08:05.200	valid	right
+5:13	08:43.900	valid	right
+5:14	09:02.800	valid	right
+5:15	09:14.700	valid	right

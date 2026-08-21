@@ -27,6 +27,9 @@ LAYOUT = {
     # the rest of the video, not by eye: red peaked at (794, 908), green at (1226, 908).
     # bout 4 shows off-target as WHITE in the same lamp, so no separate box.
     "4": dict(lamp=dict(left=(760, 890, 830, 926), right=(1192, 890, 1262, 926))),
+    # located by whole-frame contrast against the labels, same method as bout 4.
+    "5": dict(lamp=dict(left=(224, 984, 760, 1008), right=(1152, 984, 1688, 1008))),
+    "6": dict(lamp=dict(left=(856, 952, 920, 976), right=(1000, 952, 1064, 976))),
 }
 
 # Lamp brightness does NOT transfer between broadcasts -- bout 7 peaks near 230 over a

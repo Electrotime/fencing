@@ -1,0 +1,40 @@
+# Touch outcomes for data/raw_video/6.mp4. Aaron, 2026-08-21. FOIL, individual DE (FOCONI vs MASSIALAS, Paris 2025).
+# Score blank = nothing awarded. Side = who LANDED the hit.
+Score	Time stamp	Touch	Side for touch
+0:1	01:03.033	valid	right
+1:1	01:16.200	valid	left
+2:1	01:26.382	valid	left
+3:1	01:42.400	valid	left
+	01:58.400	off target	right
+3:2	02:10.000	valid	right
+4:2	02:32.650	valid	left
+5:2	02:46.400	valid	left
+	03:04.450	off target	right
+5:3	03:12.250	valid	right
+5:4	03:23.900	valid	right
+6:4	03:45.866	valid	left
+	03:59.050	off target	left
+	04:11.100	off target	left
+	04:18.350	off target	right
+	04:31.400	off target	right
+	04:43.750	off target	left
+7:4	04:51.250	valid	left
+8:4	05:11.116	valid	left
+8:5	05:36.216	valid	right
+	05:55.300	off target	right
+	06:11.616	off target	left
+8:6	06:23.100	valid	right
+8:7	06:28.816	valid	right
+9:7	06:51.750	valid	left
+	07:10.800	off target	right
+9:8	07:22.850	valid	right
+10:8	07:47.950	valid	left
+	08:06.900	off target	left
+10:9	08:24.600	valid	right
+11:9	08:58.000	valid	left
+12:9	09:26.100	valid	left
+12:10	09:33.550	valid	right
+13:10	09:46.550	valid	left
+14:10	09:54.600	valid	left
+	10:05.550	off target	both
+15:10	10:19.017	valid	left
