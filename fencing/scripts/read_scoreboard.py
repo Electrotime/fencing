@@ -30,6 +30,10 @@ LAYOUT = {
     # located by whole-frame contrast against the labels, same method as bout 4.
     "5": dict(lamp=dict(left=(224, 984, 760, 1008), right=(1152, 984, 1688, 1008))),
     "6": dict(lamp=dict(left=(856, 952, 920, 976), right=(1000, 952, 1064, 976))),
+    # bouts 1-3: NO WORKING LAMP BOX. Bout 1's red/green chevrons are permanent
+    # name-plate graphics, not lamps; bout 3's award banner region catches static red
+    # scorebug elements (16 of 18 detections read "left"); bout 2 uses an AR overlay
+    # projected on the piste. Do not add boxes here without validating against labels.
 }
 
 # Lamp brightness does NOT transfer between broadcasts -- bout 7 peaks near 230 over a
@@ -170,6 +174,40 @@ def lamp_kind(states):
     if "white" in v:
         return "white_only"          # nothing scored
     return "none"
+
+
+LOCKOUT = 2.5
+
+
+def detect_halts(t, series, thr, merge=LOCKOUT):
+    """Halts found from lamp onsets alone -- no hand labels, no score reading.
+
+    A second lamp can follow the first by up to 1.8 s in this footage (median 0.20 s,
+    p90 1.20 s), well beyond foil's 300 ms lockout because the graphic lags. Closing
+    the window early reads a double as a single, so onsets within `merge` seconds are
+    one halt and the window stays open that long.
+    """
+    onsets = []
+    for s in ("left", "right"):
+        v = series[s]["red" if s == "left" else "green"]
+        lit = v > thr["colour"][s]
+        start = np.flatnonzero(lit[1:] & ~lit[:-1]) + 1
+        if len(lit) and lit[0]:
+            start = np.r_[0, start]
+        onsets += [(float(t[i]), s) for i in start]
+    onsets.sort()
+
+    halts, cur = [], None
+    for u, s in onsets:
+        if cur is None or u - cur["t"] > merge:
+            cur = {"t": u, "sides": {s}}
+            halts.append(cur)
+        else:
+            cur["sides"].add(s)
+    for h in halts:
+        h["lights"] = ("both" if len(h["sides"]) == 2
+                       else next(iter(h["sides"])))
+    return halts
 
 
 def priority_from(states, scorer):
