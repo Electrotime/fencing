@@ -1,0 +1,16 @@
+# Two-light halts in 6.mp4. ONE ROW PER HALT WHERE BOTH LAMPS FIRED,
+# whether that is two colours or one colour and one white.
+#   awarded    left | right | none
+#   off_side   the side whose light was OFF TARGET, if one was; blank if both
+#              were valid. Needed because `none` on a mixed halt means the
+#              OFF-TARGET fencer held priority, and which side that was cannot
+#              be recovered from `none` alone.
+# Single-lamp halts are omitted: the lamp already names the scorer.
+time	awarded	off_side
+63.263		
+152.552		
+291.491		
+336.336		
+389.089		
+443.143		
+619.319		

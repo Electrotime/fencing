@@ -14,7 +14,7 @@ import check_touches as CT
 import read_scoreboard as RS
 
 LAB = PROJECT / "data" / "labels"
-CACHE = {s: f"{s}_probs_mirror.npz" for s in ("1", "4", "5", "6", "7")}
+CACHE = {s: f"{s}_probs_mirror.npz" for s in ("1","4","5","6","7","8","9")}
 BACKS = (1.0, 2.0, 3.0, 4.0)
 POOLS = ("max", "mean")
 
@@ -33,6 +33,15 @@ SELECTED_ON = ("7", "4")
 PREREG_LIGHTS = "both"
 
 # incompleteness, not bad rows: the surviving rows stay usable
+# Registered 2026-08-22 from Aaron's statement of the right-of-way rule, BEFORE
+# 8_probs_mirror.npz and 9_probs_mirror.npz existed -- the pose extraction for
+# bouts 8 and 9 was still running. Priority goes to whoever went forward FIRST,
+# which is a question of ORDER; every feature tried so far pools by max or mean
+# and is order-blind. One-sided: A's advance mass earlier -> A holds priority.
+# Not yet covered: the parry transfer rule (a defender's parry takes priority
+# back, unless the attacker parries simultaneously, which is a beat).
+ONSET_PREREG = "advance onset lead (A first) @4s"
+
 ADVISORY = ("checksum cannot run", "checksum seeded from here", "a row is probably missing")
 
 
@@ -93,6 +102,30 @@ def pooled(d, t, back, lead):
     return out
 
 
+ADV_I = CLASS_NAMES.index("advance")
+
+
+def onset_centroid(d, t, back=4.0, lead=0.3):
+    """Time-centroid of each fencer's advance probability, B minus A.
+
+    Right of way goes to whoever went forward FIRST, so the deciding quantity is
+    ORDER, which a max over a window cannot see -- it only knows who advanced
+    harder. The centroid is threshold-free and needs no tuning: if A's advance
+    mass sits earlier, centroid_A is smaller and this comes out positive.
+    The longest window is used because only it can contain the start.
+    """
+    slot, time, probs = d["slot"].astype(str), d["time"], d["probs"]
+    out = {}
+    for s in ("A", "B"):
+        m = (slot == s) & (time >= t - back) & (time <= t + lead)
+        if not m.any():
+            return None
+        w = probs[m, ADV_I].astype(float)
+        tt = time[m].astype(float)
+        out[s] = float((tt * w).sum() / w.sum()) if w.sum() > 0 else float(tt.mean())
+    return out["B"] - out["A"]
+
+
 def lights_for(stem, times):
     """left / right / both / none per halt, read off the lamp indicator."""
     lay = RS.LAYOUT.get(stem, {})
@@ -135,6 +168,12 @@ def build(T, D, lead):
     adv = [i for i, nm in enumerate(names) if nm.startswith("advance max")]
     X.append(np.mean([X[i] for i in adv], axis=0))
     names.append("advance max (A-B) mean-lookback")
+    onset = [onset_centroid(D[j], t, max(BACKS), lead)
+             for j, (_, t, _) in enumerate(T)]
+    ok2 = ok & np.array([o is not None for o in onset])
+    if ok2.sum() == ok.sum():
+        X.append(np.array([o for o, k in zip(onset, ok) if k]))
+        names.append(ONSET_PREREG)
     return np.stack(X), names, ok
 
 
@@ -198,7 +237,8 @@ def main() -> int:
         print("  VERDICT: " + ("confirmed" if one_sided < 0.05 else "not confirmed"))
         return 0
 
-    keep = [k for k, nm in enumerate(names) if "mean-lookback" not in nm]
+    excl = ("mean-lookback", "onset lead")
+    keep = [k for k, nm in enumerate(names) if not any(e in nm for e in excl)]
     Xd, X, names = Xd[keep], X[keep], [names[k] for k in keep]
     print(f"\n=== LEFT vs RIGHT: {len(names)} features, {dec.sum()} decided touches "
           f"({y.sum()} left / {(~y).sum()} right) ===")
