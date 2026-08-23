@@ -1,0 +1,14 @@
+# Two-light halts only. Aaron, 2026-08-22. `Side Awarded` is who the referee
+# gave the action to, i.e. who held PRIORITY -- not necessarily who scored:
+# on a mixed halt an off-target hit by the priority holder annuls and nothing
+# is awarded. Single-light halts are absent by design, so Score JUMPS between
+# rows and is NOT a checksum here.
+Score	Time stamp	Left	Right	Side Awarded
+1:0	00:33.199	valid	valid	left
+2:2	02:08.528	valid	valid	right
+6:2	04:36.676	valid	valid	left
+7:2	04:57.396	valid	off target	left
+10:5	08:02.648	valid	valid	left
+12:5	09:11.717	valid	off target	left
+13:6	09:41.547	valid	valid	right
+15:6	11:20.245	valid	off target	left
