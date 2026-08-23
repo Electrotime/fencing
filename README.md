@@ -208,7 +208,7 @@ Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and t
 
 ## Known limitations
 
-1. **Parry recall is 26 to 52% depending on the bout.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one.
+1. **Parry recall is 26 to 52% depending on the bout.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one. Broadcast and standard videos are limited by a low FPS and high shutter speed, causing blurring or disappearing blades, which cannot be accurately used to detect a parry. 
 2. **Cross-venue costs 6 to 10 points, and the price varies by venue.** Two venues have now been held out from the same training set and scored independently: 66.4% and 70.2%, against 75.5-80.2% on a familiar bout. Roughly a minute of labelled footage from the target venue closes most of the gap. Adding a third venue to training does not improve transfer to a fourth, so venue diversity in training is not the lever.
 3. **Motion features degrade off-venue.** The fix is a better pan estimate or a camera-invariant reformulation, not more data.
 4. **Broadcast filler is not filtered.** 28% of predictions over replays and crowd shots display a real action. Geometry-based gating caps at 36% precision, because a replay of a touch is geometrically identical to the touch.
