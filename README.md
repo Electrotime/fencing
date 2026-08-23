@@ -5,6 +5,8 @@ Action recognition for fencing from ordinary broadcast video. FenceVision detect
 
 Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
 
+On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.76 AUC** (95% CI [0.57, 0.92], p = 0.003) across 38 halts in four bouts never used to select it — a pre-registered result that survived one failed replication before confirming. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
+
 ## Features
 
 - Six-class action recognition: `advance`, `retreat`, `walking`, `neutral`, `lunge`, `parry`
@@ -14,6 +16,8 @@ Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at v
 - Mirror augmentation for left- and right-handed fencers, worth 7 points against a matched control
 - Annotated video output with per-fencer overlays
 - Leave-one-bout-out evaluation scripts and per-feature ablation controls
+- Scoreboard and lamp reading with no OCR, recovering halt times, which lamps fired, and the scorer
+- A pre-registered right-of-way test, reported with its failed replication and its failed rival hypothesis
 
 ## Installation
 
@@ -110,6 +114,56 @@ Per held-out bout, with the full decision path:
 
 **Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
+**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-9 for contested halts only (22 two-lamp halts), which is the 26% of the work the scoreboard reader cannot do itself. Nine bouts of video in total; the action model still trains on seven.
+
+## Reading the scoreboard
+
+A second pipeline reads the broadcast graphics instead of the fencers. It recovers when a halt happened, which lamps fired, and who was awarded the touch — with no OCR and no hand labels. The digits are fixed-position, so comparing digit *images* is cheaper and more accurate than recognising characters.
+
+Every production renders the scoring lamps differently: pill borders on one, the venue's LED strip on another, wide bars, score pills, permanent chevrons, a sliding name banner, an AR overlay projected on the piste. Locating the indicator is the only per-broadcast setup, and it is done by averaging frames in a window around known halts and subtracting the rest of the video, which puts the lamp at the peak of the difference.
+
+Four things had to be right, and each came from looking at frames rather than tuning:
+
+- **`min(B,G,R)`, not grayscale.** The indicator glows with the lamp colour on every touch, and in grayscale that glow is bright enough to read as a score change. Digits are white and the glow is saturated, so the minimum channel keeps one and drops the other.
+- **A presence anchor.** The scorebug slides out and a sponsor bar slides through the same band. Without checking the timer panel, those animations are indistinguishable from touches.
+- **Removing the always-lit furniture.** The score pill contains a bright specular arc. Left in, it is most of the mask, and swapping `0` for `5` moves under 4% of pixels — beneath compression noise.
+- **Novelty.** A score only rises, one at a time, so a digit image a side has already held cannot be its new score. This alone cut spurious detections from 62 to 7.
+
+Validated against hand-labelled touches on four bouts and four broadcasters:
+
+| | |
+|---|---|
+| scoring touches found | **104 / 104** |
+| lamp colour correct | **104 / 104** |
+| single-lamp halts, "that side scores" | **56 / 56** |
+
+The lockout matters more than the rulebook implies. Foil locks out at 300 ms, but the graphic lags: across 38 two-lamp halts the second lamp trails the first by a median of 0.20 s, a 90th percentile of 1.20 s, and a maximum of 1.80 s. A detector closing its window at 0.5 s reads a third of all doubles as singles.
+
+Two things it does not do. Off-target hits show a **white** lamp: one production gives them a dedicated bar and the reader finds them on 8 of 10 halts, another has no per-side white indicator and brightens globally at every stoppage, where four separate statistics all failed to separate off-target from valid. And **replays re-fire the graphic**, so the broadcast showing a touch again looks like a second touch — 48 of 51 false positives on one bout sit within 30 s of the real halt.
+
+The practical output is that hand-labelling drops to the contested halts only: **41 calls against 159 hand-labelled halts, 26% of the work.**
+
+## Right of way
+
+In foil, when both lamps fire the touch is awarded on *priority*: to whoever was attacking, and if both were, to whoever went forward first. That makes contested halts the only ones where an action model can contribute at all — a single lamp already names the scorer, and 54% of touches in this corpus are single-lamp.
+
+A pre-registered test asks whether the model's action probabilities carry that decision. The feature is the difference between the two fencers' peak `advance` probability, averaged across four lookback windows so that no window length is chosen after the fact.
+
+| bouts | role | n | AUC | one-sided p |
+|---|---|---|---|---|
+| 4, 7 | discovery | 19 | 0.83 | — |
+| 5, 6 | confirmation | 13 | 0.75 | 0.084 |
+| 8, 9 | confirmation | 14 | 0.80 | 0.036 |
+| **5, 6, 8, 9** | **pooled** | **38** | **0.76** | **0.0033** |
+
+95% CI [0.57, 0.92], which excludes chance. The pooled row is the result, not bouts 8–9 alone: the hypothesis was tested twice on held-out data, missing once and hitting once, and reporting only the hit would be selection. It survives correction for both registered features, holds under leave-one-bout-out on all four bouts, and every one of the six bouts is individually above chance (0.68 to 0.96).
+
+Three things it is not:
+
+1. **Not a decision rule.** A threshold fitted on the discovery bouts scores 82% there and **50%** on confirmation — worse than always picking the more common side. Per-bout offsets range from -0.204 to +0.029, so the ranking transfers and the boundary does not. Z-scoring within a bout, which needs no labels, gives 71% against a 58% baseline — on 38 halts, a margin of five calls.
+2. **Not order.** The rule turns on who moved *first*, so a second feature was registered *before the confirmation data existed*: the time-centroid of each fencer's advance probability. It scored **0.38**, below chance. The model sees who is attacking, not who started; a 2-second window smears an onset the referee resolves in tenths of a second.
+3. **Not deployable.** The priority label is *derived from* the scoreboard, and the contested subset is *defined by* the lamps. This measures that pose carries information about right of way. It does not replace reading the scoreboard, and a rule that needs the lamps to know which halts to apply to cannot be used where the lamps are missing.
+
 ## Evaluation protocol
 
 Eleven measured improvements were later retracted during development. The protocol below exists because of them.
@@ -159,6 +213,8 @@ Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and t
 3. **Motion features degrade off-venue.** The fix is a better pan estimate or a camera-invariant reformulation, not more data.
 4. **Broadcast filler is not filtered.** 28% of predictions over replays and crowd shots display a real action. Geometry-based gating caps at 36% precision, because a replay of a touch is geometrically identical to the touch.
 5. **One fencer's rear arm is invisible to the camera.** Where the sword arm is hidden behind the torso, accuracy falls from 81.5% to 47.8% for the same fencer. This is a limit of the camera position rather than of the model, and suppressing predictions when the arm is hidden was tested and does not generalise across bouts.
+6. **Off-target lamp detection does not transfer between broadcasts.** One production gives the white lamp its own indicator and it reads at 8/10; another has none and brightens globally at every halt, where four separate statistics failed. Locating any lamp needs either labels to contrast against or a human to look — two attempts at unsupervised localisation both found LED floods and permanent graphics instead.
+7. **The right-of-way result is a measurement, not a capability.** Its label is derived from the scoreboard and its subset is defined by the lamps, so it cannot be applied where the lamps are unreadable. No transferable decision threshold exists: the ranking generalises, the boundary does not.
 
 ## Project structure
 
@@ -168,6 +224,10 @@ fencing/
                person_detector.py, labels.py
   scripts/     demo_video.py (inference loop), train_shipping.py,
                evaluate_labels.py, sweep_parry_promote.py,
+               read_scoreboard.py (lamps, halts, score digits),
+               check_touches.py (touch-table validator),
+               label_worklist.py (contested-halt worklist),
+               exp_touch_probe.py / exp_contested.py (right-of-way tests),
                venue_motion.py, bout_timeline.py
   data/        raw_video/, labels/ (interval CSVs), train_continuous/ (cached windows)
   models/      action_mirror7.pth (shipped checkpoint)

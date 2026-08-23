@@ -361,6 +361,68 @@ def read(bout, stride=0.25, persist=2.0, tol=0.35, cache=None):
     return sorted(ev), {"overlay": ok.mean()}, len(t)
 
 
+def _series(spikes, n=200, stride=0.1):
+    """Synthetic lamp series: {side: [(time, channel)]} marks where a lamp fires."""
+    t = np.arange(n) * stride
+    ser = {s: {k: np.zeros(n, dtype=np.float32) for k in ("red", "green", "white", "wmean")}
+           for s in ("left", "right")}
+    for s, events in spikes.items():
+        for u, ch in events:
+            ser[s][ch][int(round(u / stride))] = 1.0
+    return t, ser
+
+
+def _self_test():
+    THR = {"colour": {"left": 0.5, "right": 0.5}, "white": {"left": 0.5, "right": 0.5}}
+
+    # the lockout: a second lamp trailing by 1.8 s is ONE halt, not two
+    t, ser = _series({"left": [(5.0, "red")], "right": [(6.8, "green")]})
+    h = detect_halts(t, ser, THR)
+    assert len(h) == 1 and h[0]["lights"] == "both", h
+    assert abs(h[0]["t"] - 5.0) < 1e-6, h
+
+    # ... but a 3 s gap exceeds LOCKOUT and stays two separate halts
+    t, ser = _series({"left": [(5.0, "red")], "right": [(8.0, "green")]})
+    h = detect_halts(t, ser, THR)
+    assert [x["lights"] for x in h] == ["left", "right"], h
+
+    # one lamp only
+    t, ser = _series({"left": [(2.0, "red")], "right": []})
+    h = detect_halts(t, ser, THR)
+    assert len(h) == 1 and h[0]["lights"] == "left", h
+
+    # taxonomy
+    assert lamp_kind({"left": "colour", "right": "colour"}) == "two_colour"
+    assert lamp_kind({"left": "colour", "right": "white"}) == "mixed"
+    assert lamp_kind({"left": "white", "right": "colour"}) == "mixed"
+    assert lamp_kind({"left": "colour", "right": "off"}) == "one_colour"
+    assert lamp_kind({"left": "white", "right": "white"}) == "white_only"
+    assert lamp_kind({"left": "off", "right": "off"}) == "none"
+
+    # priority: two colours -> the award names the holder
+    assert priority_from({"left": "colour", "right": "colour"}, "left") == "left"
+    assert priority_from({"left": "colour", "right": "colour"}, "none") is None
+    # mixed: the valid hit scoring means its owner had priority ...
+    assert priority_from({"left": "colour", "right": "white"}, "left") == "left"
+    # ... and nothing scoring means the OFF-TARGET fencer did
+    assert priority_from({"left": "colour", "right": "white"}, "none") == "right"
+    assert priority_from({"left": "white", "right": "colour"}, "none") == "left"
+    # two off-targets carry no information whoever had priority
+    assert priority_from({"left": "white", "right": "white"}, "none") is None
+    # a single lamp is not a priority call at all
+    assert priority_from({"left": "colour", "right": "off"}, "left") is None
+
+    # lamp_states reads colour before white, so a lit colour never reads as off-target
+    t, ser = _series({"left": [(3.0, "red"), (3.0, "wmean")], "right": []})
+    st = lamp_states(t, ser, 3.0, THR)
+    assert st["left"] == "colour" and st["right"] == "off", st
+
+    # the threshold sits between the resting level and the lit level
+    v = np.r_[np.zeros(950), np.ones(50) * 100]
+    assert 0 < lamp_threshold(v) < 100, lamp_threshold(v)
+    print("read_scoreboard self-test: ok")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bout", default="7")
@@ -369,7 +431,11 @@ def main() -> int:
     ap.add_argument("--tol", type=float, default=0.15)
     ap.add_argument("--cache")
     ap.add_argument("--sweep", action="store_true")
+    ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
+    _self_test()
+    if a.self_test:
+        return 0
 
     truth_file = LAB / f"bout{a.bout}_touches.tsv"
     truth = None
