@@ -38,6 +38,7 @@ for _n in ("--model", "--tag"):
     if _v is not None:
         _skip.add(_v)
 _args = [a for a in sys.argv[1:] if not a.startswith("--") and a not in _skip]
+FPS_NORM = "--fps-normalise" in _flags
 USE_FRAME = "--frame-model" in _flags
 NO_PRIOR = "--no-prior" in _flags
 MODEL_OVERRIDE = _flag_value("--model")
@@ -114,13 +115,26 @@ landmarkers = {s: _make_landmarker(mp.tasks.vision.RunningMode.VIDEO).__enter__(
 prev_gray, pan_windows = None, {}
 preds = []          # (slot, time, raw_label, shown_label)
 prob_rows = []      # (slot, time, prob_vector) -- cached for offline experiments
+# The window is 60 FRAMES, so on 60 fps footage it spans 1 s where 30 fps footage
+# gives 2 s, and the engineered features integrate over half the time. Decimating to
+# a common rate makes 60 samples mean the same duration everywhere.
+TARGET_FPS = 30.0
+STRIDE = max(1, int(round(fps / TARGET_FPS))) if FPS_NORM else 1
+if STRIDE > 1:
+    print(f"fps-normalise: {fps:.1f} fps, keeping every {STRIDE} frames "
+          f"-> window spans {D.WINDOW_LONG * STRIDE / fps:.2f}s")
 frame_idx = 0
+raw_idx = -1
 
 while True:
     
     ok, frame = cap.read()
     if not ok:
         break
+    raw_idx += 1
+    if raw_idx % STRIDE:
+        continue
+    now_s = raw_idx / fps
     gray = cv2.cvtColor(cv2.resize(frame, (320, 180)), cv2.COLOR_BGR2GRAY).astype(np.float32)
     pan = D._frame_pan(prev_gray, gray, pan_windows)
     prev_gray = gray
@@ -137,7 +151,7 @@ while True:
                 res = landmarkers[slot].detect_for_video(
                     mp.Image(image_format=mp.ImageFormat.SRGB,
                              data=cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)),
-                    int(frame_idx * 1000 / fps))
+                    int(now_s * 1000))
                 kp = _landmarks_to_array(res)
                 x1, y1, x2, y2 = box
                 kp[:, 0] = (x1 + kp[:, 0] * (x2 - x1)) / W
@@ -162,11 +176,11 @@ while True:
             if t.label is not None:
                 shown = ("ready" if (t.label in D.QUIET_CLASSES
                                      or t.conf < D.ACTION_CONF_FLOOR) else t.label)
-                preds.append((slot, frame_idx / fps, t.label, shown))
+                preds.append((slot, now_s, t.label, shown))
                 p = long_window_probs(action_model, t,
                                       tracks["B" if slot == "A" else "A"])
                 if p is not None:
-                    prob_rows.append((slot, frame_idx / fps, p))
+                    prob_rows.append((slot, now_s, p))
     frame_idx += 1
 
 cap.release()
