@@ -5,7 +5,7 @@ Action recognition for fencing from ordinary broadcast video. FenceVision detect
 
 Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
 
-On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.76 AUC** (95% CI [0.57, 0.92], p = 0.003) across 38 halts in four bouts never used to select it — a pre-registered result that survived one failed replication before confirming. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
+On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.72 AUC** (95% CI [0.54, 0.87], p = 0.011) across 38 halts in four bouts never used to select it — a pre-registered result that clears significance only when both confirmation attempts are pooled; neither pair reaches it alone. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
 
 ## Features
 
@@ -153,10 +153,10 @@ A pre-registered test asks whether the model's action probabilities carry that d
 |---|---|---|---|---|
 | 4, 7 | discovery | 19 | 0.83 | — |
 | 5, 6 | confirmation | 13 | 0.75 | 0.084 |
-| 8, 9 | confirmation | 14 | 0.80 | 0.036 |
-| **5, 6, 8, 9** | **pooled** | **38** | **0.76** | **0.0033** |
+| 8, 9 | confirmation | 14 | 0.71 | 0.105 |
+| **5, 6, 8, 9** | **pooled** | **38** | **0.72** | **0.0106** |
 
-95% CI [0.57, 0.92], which excludes chance. The pooled row is the result, not bouts 8–9 alone: the hypothesis was tested twice on held-out data, missing once and hitting once, and reporting only the hit would be selection. It survives correction for both registered features, holds under leave-one-bout-out on all four bouts, and every one of the six bouts is individually above chance (0.68 to 0.96).
+95% CI [0.54, 0.87], which excludes chance. The pooled row is the result: the hypothesis was tested twice on held-out data and neither attempt clears 0.05 by itself, which is what an effect of this size looks like when each half carries a dozen halts. Quoting a single pair, in either direction, would be selection. It survives correction for both registered features, holds under leave-one-bout-out on all four bouts, and every one of the six bouts is individually above chance (0.68 to 0.96).
 
 Three things it is not:
 

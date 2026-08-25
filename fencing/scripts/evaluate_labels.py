@@ -38,7 +38,9 @@ for _n in ("--model", "--tag"):
     if _v is not None:
         _skip.add(_v)
 _args = [a for a in sys.argv[1:] if not a.startswith("--") and a not in _skip]
-FPS_NORM = "--fps-normalise" in _flags
+# On by default: no correct workflow wants a 60-frame window to mean 1 s on
+# 60 fps input. --no-fps-normalise reproduces pre-2026-08-22 runs.
+FPS_NORM = "--no-fps-normalise" not in _flags
 USE_FRAME = "--frame-model" in _flags
 NO_PRIOR = "--no-prior" in _flags
 MODEL_OVERRIDE = _flag_value("--model")
