@@ -17,7 +17,8 @@ On the halts where both scoring lamps fire and the referee must award the touch 
 - Annotated video output with per-fencer overlays
 - Leave-one-bout-out evaluation scripts and per-feature ablation controls
 - Scoreboard and lamp reading with no OCR, recovering halt times, which lamps fired, and the scorer
-- A pre-registered right-of-way test, reported with its failed replication and its failed rival hypothesis
+- A pre-registered right-of-way test, reported alongside the confirmation attempt that missed and a rival hypothesis of my own that failed
+- Per-bout statistics reports separating label-derived, lamp-derived and model-derived numbers
 
 ## Installation
 
@@ -44,6 +45,12 @@ Score a model against a labelled interval CSV:
 ```bash
 python scripts/evaluate_labels.py data/raw_video/1.mp4 data/labels/bout1_intervals.csv \
     --model verify_h1_b5.pth --no-prior
+```
+
+Produce a per-bout statistics report:
+
+```bash
+python scripts/bout_stats.py --bouts 4,5,6,7
 ```
 
 Most scripts accept `--self-test`, which runs their built-in assertions without touching any video.
@@ -164,6 +171,27 @@ Three things it is not:
 2. **Not order.** The rule turns on who moved *first*, so a second feature was registered *before the confirmation data existed*: the time-centroid of each fencer's advance probability. It scored **0.38**, below chance. The model sees who is attacking, not who started; a 2-second window smears an onset the referee resolves in tenths of a second.
 3. **Not deployable.** The priority label is *derived from* the scoreboard, and the contested subset is *defined by* the lamps. This measures that pose carries information about right of way. It does not replace reading the scoreboard, and a rule that needs the lamps to know which halts to apply to cannot be used where the lamps are missing.
 
+## Bout statistics
+
+`bout_stats.py` produces a per-bout report in three layers, kept separate so a reader knows what carries a caveat: **tempo and outcomes** from the labels alone, **priority** from the lamps alone, and **action context** from the model, explicitly flagged.
+
+Across 159 hand-labelled halts in four bouts: 104 scoring (65%), median phrase 17.9 s, 38% of phrases under 15 s, longest single-fencer run 7. Tempo separates bouts that look alike on tape — bout 6 runs a 13.3 s median phrase against bout 7's 21.4 s.
+
+The layer that needs the model is the interesting one. Over 100 scoring touches, in the two seconds before the halt:
+
+| | scorer | opponent |
+|---|---|---|
+| advancing | **40%** | 28% |
+| retreating | 25% | **37%** |
+
+The scorer was advancing 12 points more often and retreating 12 points less — the expected shape, since the attacker scores, recovered from a classifier that is only ~70% accurate per window. This is the practical case for estimating rates rather than instances: a population proportion survives per-instance noise that would sink an individual prediction. It also reproduces the right-of-way finding by a completely different route, with no lamps and no pre-registration, just counting.
+
+One caveat is printed inline by the tool rather than left in the numbers: the contested-halt rate is **not comparable across bouts** unless that broadcast's white-lamp box is calibrated. Bout 7 has one and reads 68% contested; bouts 4–6 do not and read ~30%, because their mixed halts are invisible.
+
+### A note on frame rate
+
+The window is 60 frames, so 60 fps footage would give it half the intended duration. `evaluate_labels.py` decimates to ~30 fps by default; `--no-fps-normalise` restores the old behaviour for reproducing earlier runs. Running 60 fps input without it costs about 5.6 points of accuracy and 8 points of parry recall, with nothing to warn you — the corpus contains a hand-made `7_30fps.mp4` from before the flag existed, for exactly this reason.
+
 ## Evaluation protocol
 
 Eleven measured improvements were later retracted during development. The protocol below exists because of them.
@@ -228,6 +256,7 @@ fencing/
                check_touches.py (touch-table validator),
                label_worklist.py (contested-halt worklist),
                exp_touch_probe.py / exp_contested.py (right-of-way tests),
+               bout_stats.py (per-bout report),
                venue_motion.py, bout_timeline.py
   data/        raw_video/, labels/ (interval CSVs), train_continuous/ (cached windows)
   models/      action_mirror7.pth (shipped checkpoint)
