@@ -125,11 +125,13 @@ STRIDE = max(1, int(round(fps / TARGET_FPS))) if FPS_NORM else 1
 if STRIDE > 1:
     print(f"fps-normalise: {fps:.1f} fps, keeping every {STRIDE} frames "
           f"-> window spans {D.WINDOW_LONG * STRIDE / fps:.2f}s")
+n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
 frame_idx = 0
 raw_idx = -1
 
 while True:
-    
+    if raw_idx > 0 and raw_idx % 3000 == 0:
+        print(f"  ...{raw_idx}/{n_frames} frames ({raw_idx/n_frames:.0%})", flush=True)
     ok, frame = cap.read()
     if not ok:
         break

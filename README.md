@@ -5,7 +5,7 @@ Action recognition for fencing from ordinary broadcast video. FenceVision detect
 
 Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
 
-On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.72 AUC** (95% CI [0.54, 0.87], p = 0.011) across 38 halts in four bouts never used to select it — a pre-registered result that clears significance only when both confirmation attempts are pooled; neither pair reaches it alone. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
+On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.70 AUC** (95% CI [0.53, 0.85], p = 0.010) across 48 halts in five bouts never used to select it — a pre-registered result that clears significance only when all three confirmation attempts are pooled; no attempt reaches it alone. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
 
 ## Features
 
@@ -161,13 +161,14 @@ A pre-registered test asks whether the model's action probabilities carry that d
 | 4, 7 | discovery | 19 | 0.83 | — |
 | 5, 6 | confirmation | 13 | 0.75 | 0.084 |
 | 8, 9 | confirmation | 14 | 0.71 | 0.105 |
-| **5, 6, 8, 9** | **pooled** | **38** | **0.72** | **0.0106** |
+| 10 | confirmation | 10 | 0.64 | 0.276 |
+| **5, 6, 8, 9, 10** | **pooled** | **48** | **0.70** | **0.0101** |
 
-95% CI [0.54, 0.87], which excludes chance. The pooled row is the result: the hypothesis was tested twice on held-out data and neither attempt clears 0.05 by itself, which is what an effect of this size looks like when each half carries a dozen halts. Quoting a single pair, in either direction, would be selection. It survives correction for both registered features, holds under leave-one-bout-out on all four bouts, and every one of the six bouts is individually above chance (0.68 to 0.96).
+95% CI [0.53, 0.85], which excludes chance. The pooled row is the result: the hypothesis was tested three times on held-out data and no attempt clears 0.05 by itself, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It survives correction for both registered features, holds under leave-one-bout-out on all five bouts, and every one of the seven bouts is individually above chance (0.58 to 0.96).
 
 Three things it is not:
 
-1. **Not a decision rule.** A threshold fitted on the discovery bouts scores 82% there and **50%** on confirmation — worse than always picking the more common side. Per-bout offsets range from -0.204 to +0.029, so the ranking transfers and the boundary does not. Z-scoring within a bout, which needs no labels, gives 71% against a 58% baseline — on 38 halts, a margin of five calls.
+1. **Not a decision rule.** A threshold fitted on the discovery bouts scores 82% there and **50%** on confirmation — worse than always picking the more common side. Per-bout offsets range from -0.204 to +0.029, so the ranking transfers and the boundary does not. Z-scoring within a bout, which needs no labels, gives 69% against a 56% baseline — on 48 halts, a margin of six calls.
 2. **Not order.** The rule turns on who moved *first*, so a second feature was registered *before the confirmation data existed*: the time-centroid of each fencer's advance probability. It scored **0.38**, below chance. The model sees who is attacking, not who started; a 2-second window smears an onset the referee resolves in tenths of a second.
 3. **Not deployable.** The priority label is *derived from* the scoreboard, and the contested subset is *defined by* the lamps. This measures that pose carries information about right of way. It does not replace reading the scoreboard, and a rule that needs the lamps to know which halts to apply to cannot be used where the lamps are missing.
 
