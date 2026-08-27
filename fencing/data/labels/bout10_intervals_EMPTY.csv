@@ -1,0 +1,5 @@
+# probs cache only. Two throwaway rows so load_intervals has both slots;
+# the scoring report is meaningless here and is not used.
+fencer,start,end,footwork,blade
+left,0.000,0.033,neutral,none
+right,0.000,0.033,neutral,none
