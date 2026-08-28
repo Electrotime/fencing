@@ -119,6 +119,23 @@ Per held-out bout, with the full decision path:
 
 ² Bout 1 contains 8 parry windows, too few to mean anything. Bouts 4 and 7 carry 207 and 204.
 
+### Does the sequence model earn its keep?
+
+The obvious challenge to an LSTM is that a gradient-boosted tree on summary statistics might do just as well. Tested directly, leave-one-bout-out, against features that are *order-blind* by construction — the per-landmark mean and standard deviation over the same 60-frame window, which cannot see sequence at all:
+
+| held-out bout | majority class | logistic (6 feat) | boosted trees (6 feat) | boosted trees (270 feat) | LSTM |
+|---|---|---|---|---|---|
+| 1 | 43.2% | 67.9% | 71.3% | 75.7% | **80.2%** |
+| 4 | 41.6% | 64.3% | 63.4% | **74.1%** | 73.4% |
+| 5 | 27.8% | 57.5% | 61.6% | 69.2% | **71.8%** |
+| 6 | 24.5% | 63.2% | 60.6% | 71.9% | **73.7%** |
+| 7 | 36.9% | 45.6% | 57.5% | 63.1% | **69.1%** |
+| **mean** | 34.8% | 59.7% | 62.9% | **70.8%** | **73.6%** |
+
+**The margin is +2.8 points, and the trees win one bout of five.** That is a smaller gap than the framing elsewhere in this README implies. Two things keep it honest in the LSTM's favour: the comparison is not protocol-matched — the LSTM also trains on the hand-cut clips, uses class weights and averages four seeds, none of which the baseline gets — and its advantage is consistent in direction on four of five bouts rather than driven by one.
+
+The fair conclusion is that ordering carries a real but modest signal on top of pose statistics, not that the sequence model is doing the heavy lifting. Most of the accuracy is available to a tree that cannot see time at all.
+
 **Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
 **Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-9 for contested halts only (22 two-lamp halts), which is the 26% of the work the scoreboard reader cannot do itself. Nine bouts of video in total; the action model still trains on seven.
