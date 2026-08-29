@@ -121,7 +121,7 @@ Per held-out bout, with the full decision path:
 
 ### Does the sequence model earn its keep?
 
-The obvious challenge to an LSTM is that a gradient-boosted tree on summary statistics might do just as well. Tested directly, leave-one-bout-out, against features that are *order-blind* by construction — the per-landmark mean and standard deviation over the same 60-frame window, which cannot see sequence at all:
+The obvious challenge to an LSTM is that a gradient-boosted tree on summary statistics might do just as well. Tested directly, leave-one-bout-out, on the per-landmark mean and standard deviation over the same 60-frame window plus the six engineered aggregates — the same inputs the LSTM's head receives:
 
 | held-out bout | majority class | logistic (6 feat) | boosted trees (6 feat) | boosted trees (270 feat) | LSTM |
 |---|---|---|---|---|---|
@@ -132,9 +132,35 @@ The obvious challenge to an LSTM is that a gradient-boosted tree on summary stat
 | 7 | 36.9% | 45.6% | 57.5% | 63.1% | **69.1%** |
 | **mean** | 34.8% | 59.7% | 62.9% | **70.8%** | **73.6%** |
 
-**The margin is +2.8 points, and the trees win one bout of five.** That is a smaller gap than the framing elsewhere in this README implies. Two things keep it honest in the LSTM's favour: the comparison is not protocol-matched — the LSTM also trains on the hand-cut clips, uses class weights and averages four seeds, none of which the baseline gets — and its advantage is consistent in direction on four of five bouts rather than driven by one.
+Note what these features are *not*: order-blind. Mean and standard deviation are permutation-invariant, but the aggregates are not — the first of them is signed net displacement, positive advancing and negative retreating, which is precisely the temporal fact separating two of the six classes. Decomposing it:
 
-The fair conclusion is that ordering carries a real but modest signal on top of pose statistics, not that the sequence model is doing the heavy lifting. Most of the accuracy is available to a tree that cannot see time at all.
+| feature set | mean accuracy | advance recall | retreat recall |
+|---|---|---|---|
+| aggregates + mean/std | 70.8% | 66.4% | 71.7% |
+| drop signed displacement only | 68.1% | 63.6% | 63.8% |
+| mean/std alone (genuinely order-invariant) | 64.2% | 61.5% | **52.7%** |
+| signed displacement alone, one number | 39.4% | 56.7% | 46.4% |
+
+**One hand-computed number carries most of the temporal load.** On its own it reaches 56.7% advance recall; removing it costs 2.7 points, and removing all six aggregates costs 19 points of retreat recall. Time matters here — it has simply been distilled into a scalar by `_engineered_features` before either model sees it, which leaves the LSTM little to add.
+
+**The margin is +2.8 points, and the trees win one bout of five** — already smaller than the framing elsewhere in this README implies. But that comparison is not protocol-matched: the LSTM also trains on the hand-cut clips, uses inverse-frequency class weights and averages four seeds, none of which the baseline gets. So +2.8 is an *upper* bound on the architecture's contribution.
+
+Stripping those three advantages and retraining leave-one-bout-out on bout windows alone, two seeds per fold, gives the matched number:
+
+| held-out bout | trees | LSTM, matched | LSTM, full recipe |
+|---|---|---|---|
+| 1 | 75.7% | 75.9% | 80.2% |
+| 4 | **74.1%** | 70.5% | 73.4% |
+| 5 | **69.2%** | 59.6% | 71.8% |
+| 6 | **71.9%** | 64.1% | 73.7% |
+| 7 | **63.1%** | 59.6% | 69.1% |
+| **mean** | **70.8%** | **65.9%** | 73.6% |
+
+**Under matched conditions the LSTM loses to the trees by 4.9 points, on four folds of five.** The recorded advantage is worth +7.7 points and comes from the training recipe — clips, class weights, seed averaging — not from the architecture. At equal data and equal features, the tree is the stronger model.
+
+Two honest qualifications. Matching on class weights is not neutral: the LSTM's recipe was tuned around them and the trees never needed them, so removing them may penalise the LSTM specifically rather than levelling the field. And seed spread reaches 5.2 points on a single fold, which is larger than several of the gaps being compared. The clean follow-up is to restore class weights while keeping the data matched, isolating whether they explain the collapse — not yet run.
+
+What this does not overturn: the +30 points from continuous windows over hand-cut clips. That was a claim about **label quality**, and it stands. It has simply been doing double duty as an argument for the architecture, which it never supported.
 
 **Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
