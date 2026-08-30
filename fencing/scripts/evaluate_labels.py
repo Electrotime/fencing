@@ -45,11 +45,18 @@ USE_FRAME = "--frame-model" in _flags
 NO_PRIOR = "--no-prior" in _flags
 MODEL_OVERRIDE = _flag_value("--model")
 TAG = _flag_value("--tag", "")
+WINDOW = int(_flag_value("--window", 0) or 0)
+DUMP_TRACKS = "--dump-tracks" in _flags
 VIDEO = Path(_args[0]) if _args else PROJECT / "data" / "raw_video" / "1.mp4"
 LABELS = (Path(_args[1]) if len(_args) > 1
           else PROJECT / "data" / "labels" / "bout1_intervals.csv")
 CACHE_OUT = (PROJECT / "data" / "labels" /
              f"{VIDEO.stem}_probs{'_frame' if USE_FRAME else ''}{TAG}.npz")
+
+if WINDOW:
+    D.WINDOW_LONG = WINDOW
+    D.MIN_REAL_FRAMES = min(D.MIN_REAL_FRAMES, max(D.MIN_REAL_SHORT, WINDOW // 2))
+    print(f"window override: {WINDOW} frames, min real {D.MIN_REAL_FRAMES}")
 
 truth, two_track = load_intervals(LABELS)   # slot -> [(start, end, label)]
 print(f"labels: {LABELS.name} "
@@ -126,6 +133,11 @@ if STRIDE > 1:
     print(f"fps-normalise: {fps:.1f} fps, keeping every {STRIDE} frames "
           f"-> window spans {D.WINDOW_LONG * STRIDE / fps:.2f}s")
 n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+kept_times = []
+# FencerTrack.kp is a deque(maxlen=SEQ_LEN), so it only ever holds the last 60
+# frames -- accumulate the full history separately or the dump is 60 frames long.
+full_kp = {"A": [], "B": []}
+full_mot = {"A": [], "B": []}
 frame_idx = 0
 raw_idx = -1
 
@@ -139,6 +151,7 @@ while True:
     if raw_idx % STRIDE:
         continue
     now_s = raw_idx / fps
+    kept_times.append(now_s)
     gray = cv2.cvtColor(cv2.resize(frame, (320, 180)), cv2.COLOR_BGR2GRAY).astype(np.float32)
     pan = D._frame_pan(prev_gray, gray, pan_windows)
     prev_gray = gray
@@ -166,6 +179,9 @@ while True:
                 track.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)
         track.kp.append(kp)
         track.motion.append((pan, track.last_hip_x))
+        if DUMP_TRACKS:
+            full_kp[slot].append(kp.copy())
+            full_mot[slot].append((pan, track.last_hip_x))
 
     if frame_idx % D.PREDICT_EVERY == 0 and frame_idx >= D.WINDOW_LONG:
         for slot in ("A", "B"):
@@ -196,6 +212,15 @@ np.savez(CACHE_OUT,
          time=np.array([r[1] for r in prob_rows], dtype=np.float32),
          probs=np.stack([r[2] for r in prob_rows]))
 print(f"cached {len(prob_rows)} probability vectors for offline analysis\n")
+
+if DUMP_TRACKS:
+    tp = CACHE_OUT.with_name(f"{VIDEO.stem}_tracks{TAG}.npz")
+    np.savez_compressed(
+        tp, times=np.array(kept_times, dtype=np.float32),
+        **{f"kp_{s_}": np.stack(full_kp[s_]).astype(np.float32) for s_ in ("A", "B")},
+        **{f"motion_{s_}": np.array(full_mot[s_], dtype=np.float32) for s_ in ("A", "B")})
+    print(f"dumped tracks to {tp.name} ({tp.stat().st_size / 1e6:.0f} MB, "
+          f"{len(kept_times)} frames)", flush=True)
 
 # ---- score -----------------------------------------------------------------
 _scored = [(s, truth_at(s, t), raw, shown) for s, t, raw, shown in preds

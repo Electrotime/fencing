@@ -42,6 +42,23 @@ PREREG_LIGHTS = "both"
 # back, unless the attacker parries simultaneously, which is a beat).
 ONSET_PREREG = "advance onset lead (A first) @4s"
 
+# Registered 2026-08-27, BEFORE any frame-level cache existed for bouts 5,6,8,9,10.
+# Why a retry: the window model reports a 2 s window at every timestep, and its
+# advance probability decays with a 1.58 s autocorrelation time. Foil lockout is
+# 0.30 s, so the instrument is ~5x too coarse to time an onset at all. This asks
+# whether per-frame resolution rescues the SAME statistic, unchanged: time-centroid
+# of advance probability over [t-4.0, t+0.3], B minus A, one-sided, A earlier -> A
+# holds priority. Same halts, same direction. Only the probability source changes.
+# Third registered feature, so the family correction becomes x3.
+# SUPERSEDED 2026-08-27, before any run: models/action_frame.pth expects 6 agg
+# features (head 134) and the pipeline now feeds 13 (141). It predates wide_agg by
+# three weeks and nothing in the repo trains a replacement. Registered source is
+# now the CURRENT model over a 25-frame window (0.83 s) instead of 60 (2.00 s).
+# Statistic, direction, halts and subset all unchanged. Trades blur for noise: the
+# model was trained at 60 frames, so 25 is off-distribution. That is the cost of
+# the only resolution test available without retraining.
+ONSET_SHORT_PREREG = "advance onset lead (A first) @4s [25-frame window]"
+
 ADVISORY = ("checksum cannot run", "checksum seeded from here", "a row is probably missing")
 
 

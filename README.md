@@ -207,7 +207,23 @@ A pre-registered test asks whether the model's action probabilities carry that d
 | 10 | confirmation | 10 | 0.64 | 0.276 |
 | **5, 6, 8, 9, 10** | **pooled** | **48** | **0.70** | **0.0101** |
 
-95% CI [0.53, 0.85], which excludes chance. The pooled row is the result: the hypothesis was tested three times on held-out data and no attempt clears 0.05 by itself, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It survives correction for both registered features, holds under leave-one-bout-out on all five bouts, and every one of the seven bouts is individually above chance (0.58 to 0.96).
+95% CI [0.53, 0.85], which excludes chance. The pooled row is the result: the hypothesis was tested three times on held-out data and no attempt clears 0.05 by itself, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It survives correction for all three registered features (p 0.030), holds under leave-one-bout-out on all five bouts, and every one of the seven bouts is individually above chance (0.58 to 0.96).
+
+### The rule says *order*, and order is the part that fails
+
+Foil priority goes to whoever went forward **first**. That is a question of ordering, so it was registered directly as a feature — the time-centroid of each fencer's `advance` probability, one-sided, earlier mass meaning priority. It has now failed three registered times:
+
+| attempt | window | AUC | one-sided p |
+|---|---|---|---|
+| bouts 8, 9 | 2.00s | 0.38 | — |
+| pooled, n=48 | 2.00s | 0.44 | 0.750 |
+| pooled, n=48 | **0.83s** | **0.38** | 0.917 |
+
+The third was a deliberate test of the obvious excuse: that the model reports a 2-second window at every timestep and simply cannot time a 0.3-second lockout. Shrinking the window to 0.83s should have relieved that. **It did not.** The `advance` probability's autocorrelation decay fell only from 1.58s to 1.25s — a 2.4× smaller window bought a 1.26× sharper signal — and the feature got *worse*, not better.
+
+That near-invariance is the actual finding. If the blur came from the window, it would have scaled with the window. It did not, so **the smoothing is intrinsic to pose motion**: fencing footwork at 30fps, seen through 33 landmarks, does not carry a resolvable 0.3-second onset. No window length or architecture recovers it.
+
+So the working feature is order-blind by necessity, not by choice. "Who advanced harder" is answerable; "who advanced first" is not — which is a limitation of the measurement, not of the referee's rule.
 
 Three things it is not:
 

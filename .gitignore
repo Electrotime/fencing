@@ -62,6 +62,11 @@ fencing/models/verify_*.pth
 # both landed in commits before anyone noticed. Matching any tag is the fix.
 fencing/data/labels/*_probs_*.npz
 
+# Per-frame keypoint/motion dumps from evaluate_labels.py --dump-tracks. 11-19 MB
+# each, 72 MB for the five pooled bouts, and regenerable from video in ~2 h. They
+# exist so a window-length change is an offline recompute instead of re-extraction.
+fencing/data/labels/*_tracks_*.npz
+
 # CLAUDE.md is the working findings log -- kept LOCAL, deliberately untracked
 # (git rm --cached, 2026-08-14). It is a candid lab notebook: retractions, dead
 # ends, and half-finished reasoning aimed at whoever is working on the code next.
