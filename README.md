@@ -164,7 +164,7 @@ What this does not overturn: the +30 points from continuous windows over hand-cu
 
 **Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
-**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-9 for contested halts only (22 two-lamp halts), which is the 26% of the work the scoreboard reader cannot do itself. Nine bouts of video in total; the action model still trains on seven.
+**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-10 for contested halts only (37 halts where both lamps lit), which is the 40% of the work the scoreboard reader cannot do itself. Ten bouts of video in total; the action model still trains on seven.
 
 ## Reading the scoreboard
 
@@ -187,11 +187,11 @@ Validated against hand-labelled touches on four bouts and four broadcasters:
 | lamp colour correct | **104 / 104** |
 | single-lamp halts, "that side scores" | **56 / 56** |
 
-The lockout matters more than the rulebook implies. Foil locks out at 300 ms, but the graphic lags: across 38 two-lamp halts the second lamp trails the first by a median of 0.20 s, a 90th percentile of 1.20 s, and a maximum of 1.80 s. A detector closing its window at 0.5 s reads a third of all doubles as singles.
+The lockout matters more than the rulebook implies. Foil locks out at 300 ms, but the graphic lags: across the 38 halts where both lamps showed colour the second lamp trails the first by a median of 0.20 s, a 90th percentile of 1.20 s, and a maximum of 1.80 s. A detector closing its window at 0.5 s reads a third of all doubles as singles.
 
 Two things it does not do. Off-target hits show a **white** lamp: one production gives them a dedicated bar and the reader finds them on 8 of 10 halts, another has no per-side white indicator and brightens globally at every stoppage, where four separate statistics all failed to separate off-target from valid. And **replays re-fire the graphic**, so the broadcast showing a touch again looks like a second touch — 48 of 51 false positives on one bout sit within 30 s of the real halt.
 
-The practical output is that hand-labelling drops to the contested halts only: **41 calls against 159 hand-labelled halts, 26% of the work.**
+The practical output is that hand-labelling drops to the contested halts only — the ones where both lamps lit: **64 of 159 halts, 40% of the work**, being 38 where both lamps showed colour and 26 mixing colour with white.
 
 ## Right of way
 
