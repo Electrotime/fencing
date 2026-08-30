@@ -442,9 +442,10 @@ def main() -> None:
     argv = [a for a in sys.argv[1:]
             if a != "--frame-model" and not a.startswith("--") and a not in _skip]
     use_frame = "--frame-model" in sys.argv
+    want_board = "--scoreboard" in sys.argv
     if not argv:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
-                 "[--start S] [--end S] [--frame-model | --self-test]")
+                 "[--start S] [--end S] [--scoreboard] [--frame-model | --self-test]")
     video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")
@@ -472,6 +473,11 @@ def main() -> None:
             mpath, device=torch.device("cpu"),
             cls=lambda: ActionLSTM(pool=POOL_MODE,
                                    n_agg=N_AGG_WIDE if USE_OPPONENT else 6))
+    board = None
+    if want_board:
+        import scoreboard_overlay as SB
+        board = SB.load(video.stem)
+        print(f"scoreboard: {len(board['halts'])} halts on bout {video.stem}")
     blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
     if blade_model is None:
         print("(no blade weights found, skipping the blade tip overlay)")
@@ -592,6 +598,9 @@ def main() -> None:
             if blade_model is not None:
                 draw_blade_tip(frame, get_blade_tip(frame, blade_model))
 
+            if board is not None:
+                import scoreboard_overlay as SB
+                SB.draw(frame, board, (first + idx) / fps)
             writer.write(frame)
 
     cap.release()
