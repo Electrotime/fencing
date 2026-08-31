@@ -49,39 +49,44 @@ def load(stem):
 
 
 def draw(frame, data, now_s):
-    """Panel across the bottom: two lamps, and the call when a halt is live."""
+    """Panel at top-centre, clear of the broadcast's own scoreboard along the bottom."""
     H, W = frame.shape[:2]
-    y0 = H - BAR_H
-    strip = frame[y0:H].copy()
-    cv2.rectangle(strip, (0, 0), (W, BAR_H), (0, 0, 0), -1)
-    frame[y0:H] = cv2.addWeighted(strip, 0.55, frame[y0:H], 0.45, 0)
+    x0, x1, y1 = int(W * 0.31), int(W * 0.69), 150
+    box = frame[0:y1, x0:x1].copy()
+    cv2.rectangle(box, (0, 0), (x1 - x0, y1), (18, 18, 18), -1)
+    frame[0:y1, x0:x1] = cv2.addWeighted(box, 0.88, frame[0:y1, x0:x1], 0.12, 0)
+    cv2.rectangle(frame, (x0, 0), (x1 - 1, y1), (90, 90, 90), 2)
 
     i = int(np.searchsorted(data["t"], now_s))
     i = min(max(i, 0), len(data["t"]) - 1)
-    for s, cx in (("left", int(W * 0.30)), ("right", int(W * 0.70))):
+    for s, cx in (("left", x0 + int((x1 - x0) * 0.16)),
+                  ("right", x0 + int((x1 - x0) * 0.84))):
         v = int(data["state"][s][i])
         col = OFF if v == 0 else (WHITE if v == 1 else
                                   ((60, 60, 235) if s == "left" else (60, 210, 60)))
-        cv2.circle(frame, (cx, y0 + 52), 30, col, -1)
-        cv2.circle(frame, (cx, y0 + 52), 30, (200, 200, 200), 2)
-        cv2.putText(frame, s.upper(), (cx - 34, y0 + 108),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (210, 210, 210), 1, cv2.LINE_AA)
+        cv2.circle(frame, (cx, 52), 27, col, -1)
+        cv2.circle(frame, (cx, 52), 27, (200, 200, 200), 2)
+        cv2.putText(frame, s.upper(), (cx - 30, 96), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55, (205, 205, 205), 1, cv2.LINE_AA)
 
     live = [(u, p) for u, p in data["halts"] if u + HOLD[0] <= now_s <= u + HOLD[1]]
     if not live:
+        cv2.putText(frame, "scoreboard reader", (x0 + 20, y1 - 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (140, 140, 140), 1, cv2.LINE_AA)
         return frame
     u, ref = live[0]
     got = data["calls"].get(round(u, 2))
-    cv2.putText(frame, "HALT", (int(W * 0.44), y0 + 34),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 215, 255), 2, cv2.LINE_AA)
-    cv2.putText(frame, f"referee: {ref}", (int(W * 0.42), y0 + 68),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (235, 235, 235), 2, cv2.LINE_AA)
+    cx = (x0 + x1) // 2
+    cv2.putText(frame, "HALT", (cx - 38, 34), cv2.FONT_HERSHEY_SIMPLEX,
+                0.85, (0, 215, 255), 2, cv2.LINE_AA)
+    cv2.putText(frame, f"referee: {ref}", (cx - 76, 72), cv2.FONT_HERSHEY_SIMPLEX,
+                0.62, (235, 235, 235), 2, cv2.LINE_AA)
     if got:
         call, truth = got
         ok = call == truth
-        cv2.putText(frame, f"model: {call}  {'OK' if ok else 'MISS'}",
-                    (int(W * 0.42), y0 + 102), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                    (60, 210, 60) if ok else (60, 60, 235), 2, cv2.LINE_AA)
+        cv2.putText(frame, f"model: {call}  {'OK' if ok else 'MISS'}", (cx - 82, 108),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62,
+                    (60, 210, 60) if ok else (70, 70, 245), 2, cv2.LINE_AA)
     return frame
 
 
