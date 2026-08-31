@@ -1,4 +1,4 @@
-"""Blade detection with the fine-tuned YOLO model, plus tip position/velocity helpers."""
+"""Blade detection with the fine-tuned YOLO model, plus point position/velocity helpers."""
 
 from __future__ import annotations
 
@@ -21,23 +21,57 @@ def load_blade_model(weights_path: str | Path) -> YOLO:
     return YOLO(str(weights_path))
 
 
-def get_blade_tip(frame: np.ndarray, model: YOLO) -> tuple[float, float] | None:
-    """Center of the most confident blade box as (x, y), or None if no blade found."""
+def get_blade_box(frame: np.ndarray, model: YOLO) -> tuple[float, float, float, float] | None:
+    """Most confident blade box as (x1, y1, x2, y2), or None if no blade found."""
     results = model(frame, conf=MIN_BLADE_CONFIDENCE, verbose=False)
     boxes = results[0].boxes
     if boxes is None or len(boxes) == 0:
         return None
-
     best_idx = int(boxes.conf.argmax())
     x1, y1, x2, y2 = boxes.xyxy[best_idx].cpu().numpy()
+    return (float(x1), float(y1), float(x2), float(y2))
+
+
+def get_blade_centre(frame: np.ndarray, model: YOLO) -> tuple[float, float] | None:
+    """Centre of the most confident blade box -- roughly the blade's MIDPOINT, not its tip."""
+    box = get_blade_box(frame, model)
+    if box is None:
+        return None
+    x1, y1, x2, y2 = box
     return (float((x1 + x2) / 2), float((y1 + y2) / 2))
 
 
-def get_blade_tip_trajectory(
+def blade_tip_from_box(box, wrists) -> tuple[float, float] | None:
+    """Tip estimate: the box corner farthest from the nearest wrist holding the blade.
+
+    A blade lies along one diagonal of its box, so its two ends are opposite corners;
+    the far one from the hand is the point.
+    """
+    if box is None or not wrists:
+        return None
+    x1, y1, x2, y2 = box
+    corners = ((x1, y1), (x2, y2), (x1, y2), (x2, y1))
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    wx, wy = min(wrists, key=lambda w: (w[0] - cx) ** 2 + (w[1] - cy) ** 2)
+    return max(corners, key=lambda c: (c[0] - wx) ** 2 + (c[1] - wy) ** 2)
+
+
+def get_blade_tip(frame: np.ndarray, model: YOLO, wrists=None) -> tuple[float, float] | None:
+    """Blade point. Without wrists there is nothing to orient by, so the centre is returned."""
+    box = get_blade_box(frame, model)
+    if box is None:
+        return None
+    if not wrists:
+        x1, y1, x2, y2 = box
+        return (float((x1 + x2) / 2), float((y1 + y2) / 2))
+    return blade_tip_from_box(box, wrists)
+
+
+def get_blade_centre_trajectory(
     video_path: str | Path,
     model: YOLO,
 ) -> list[tuple[float, float] | None]: 
-    """Blade tip position for every frame of a video (None where nothing was found)."""
+    """Blade CENTRE for every frame of a video (None where nothing was found)."""
     video_path = Path(video_path)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -51,7 +85,7 @@ def get_blade_tip_trajectory(
             ok, frame = cap.read()
             if not ok:
                 break
-            trajectory.append(get_blade_tip(frame, model))
+            trajectory.append(get_blade_centre(frame, model))
             bar.update(1)
 
     cap.release()
@@ -74,6 +108,18 @@ def compute_tip_velocity(
             velocities.append((float(curr[0] - prev[0]), float(curr[1] - prev[1])))
     
     return velocities
+
+
+def _self_test_tip():
+    """The tip is the far diagonal end from the hand, and degrades to None safely."""
+    box = (100.0, 100.0, 200.0, 200.0)
+    assert blade_tip_from_box(box, [(95.0, 205.0)]) == (200.0, 100.0)
+    assert blade_tip_from_box(box, [(205.0, 95.0)]) == (100.0, 200.0)
+    assert blade_tip_from_box(box, []) is None
+    assert blade_tip_from_box(None, [(1.0, 1.0)]) is None
+    near = blade_tip_from_box(box, [(95.0, 205.0), (1000.0, 1000.0)])
+    assert near == (200.0, 100.0), "must orient by the NEAREST wrist"
+    print("blade tip self-test ok")
 
 
 if __name__ == "__main__":

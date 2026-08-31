@@ -19,7 +19,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.action_model import (ActionFrameLSTM, ActionLSTM, CLASS_NAMES, INPUT_SIZE,
                               N_AGG_WIDE, SEQ_LEN, _engineered_features,
                               frame_logits_to_window, load_action_model, wide_agg)
-from src.blade_detector import get_blade_tip, load_blade_model
+from src.blade_detector import get_blade_box, blade_tip_from_box, load_blade_model
 from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _landmarks_to_array, _make_landmarker,
@@ -31,6 +31,7 @@ MODEL_PATH = PROJECT_ROOT / "models" / "action_mirror7.pth"
 POOL_MODE = "last"
 USE_OPPONENT = True
 FRAME_MODEL_PATH = PROJECT_ROOT / "models" / "action_frame.pth"  # --frame-model
+WRIST_L, WRIST_R = 15, 16
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
 
@@ -480,7 +481,7 @@ def main() -> None:
         print(f"scoreboard: {len(board['halts'])} halts on bout {video.stem}")
     blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
     if blade_model is None:
-        print("(no blade weights found, skipping the blade tip overlay)")
+        print("(no blade weights found, skipping the blade point overlay)")
 
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
@@ -596,7 +597,11 @@ def main() -> None:
                     draw_action_label(frame, f"{slot}: ready", None, org=org, color=(150, 150, 150))
 
             if blade_model is not None:
-                draw_blade_tip(frame, get_blade_tip(frame, blade_model))
+                wr = [(t_.prev[w, 0] * W, t_.prev[w, 1] * H)
+                      for t_ in tracks.values() for w in (WRIST_L, WRIST_R)
+                      if t_.prev[w, 3] >= VISIBILITY_THRESHOLD]
+                draw_blade_tip(frame, blade_tip_from_box(
+                    get_blade_box(frame, blade_model), wr))
 
             if board is not None:
                 import scoreboard_overlay as SB

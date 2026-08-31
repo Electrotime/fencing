@@ -30,7 +30,7 @@ def draw_skeleton(frame: np.ndarray, points: np.ndarray,
 
 
 def draw_blade_tip(frame: np.ndarray, tip: tuple[float, float] | None) -> np.ndarray:
-    """Green dot on the blade tip (no-op if tip is None). Returns the frame."""
+    """Green dot on the blade point (no-op if it is None). Returns the frame."""
     if tip is not None:
         x, y = int(tip[0]), int(tip[1])
         cv2.circle(frame, (x, y), 8, TIP_COLOR, 2)
