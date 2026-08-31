@@ -19,12 +19,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.action_model import (ActionFrameLSTM, ActionLSTM, CLASS_NAMES, INPUT_SIZE,
                               N_AGG_WIDE, SEQ_LEN, _engineered_features,
                               frame_logits_to_window, load_action_model, wide_agg)
-from src.blade_detector import get_blade_box, blade_tip_from_box, load_blade_model
+from src.blade_detector import (get_blade_box, get_blade_boxes, blade_tip_from_box,
+                                blade_tip_directed, blade_tip_linefit,
+                                load_blade_model)
 from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _landmarks_to_array, _make_landmarker,
                                _normalize_sequence)
-from src.utils import draw_action_label, draw_blade_tip, draw_skeleton
+from src.utils import draw_action_label, draw_blade_tip, draw_blade_trail, draw_skeleton
 
 # seven bouts, four venues, mirror-augmented; see CLAUDE.md.
 MODEL_PATH = PROJECT_ROOT / "models" / "action_mirror7.pth"
@@ -32,6 +34,10 @@ POOL_MODE = "last"
 USE_OPPONENT = True
 FRAME_MODEL_PATH = PROJECT_ROOT / "models" / "action_frame.pth"  # --frame-model
 WRIST_L, WRIST_R = 15, 16
+ELBOW_L, ELBOW_R = 13, 14
+TRAIL_LEN = 30          # ~1 s of tip history
+TRAIL_JUMP = 0.22       # fraction of frame width that breaks the ribbon
+TRAIL_COLORS = {"A": (80, 170, 255), "B": (255, 200, 90)}
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
 
@@ -444,9 +450,10 @@ def main() -> None:
             if a != "--frame-model" and not a.startswith("--") and a not in _skip]
     use_frame = "--frame-model" in sys.argv
     want_board = "--scoreboard" in sys.argv
+    want_trail = "--trail" in sys.argv
     if not argv:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
-                 "[--start S] [--end S] [--scoreboard] [--frame-model | --self-test]")
+                 "[--start S] [--end S] [--scoreboard] [--trail] [--frame-model | --self-test]")
     video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")
@@ -504,6 +511,7 @@ def main() -> None:
     writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (W, H))
 
     tracks = {"A": FencerTrack(), "B": FencerTrack()}
+    trails = {"A": deque(maxlen=TRAIL_LEN), "B": deque(maxlen=TRAIL_LEN)}
     prev_gray = None
     pan_windows: dict = {}
 
@@ -596,7 +604,53 @@ def main() -> None:
                     # tracked but not doing a scoring action -> a quiet "ready" tag
                     draw_action_label(frame, f"{slot}: ready", None, org=org, color=(150, 150, 150))
 
-            if blade_model is not None:
+            if blade_model is not None and want_trail:
+                _arm = {}
+                for s_, t_ in tracks.items():
+                    opp = 0.0 if s_ == "B" else 1.0
+                    best = None
+                    for el, wr_ in ((ELBOW_L, WRIST_L), (ELBOW_R, WRIST_R)):
+                        if min(t_.prev[el, 3], t_.prev[wr_, 3]) < VISIBILITY_THRESHOLD:
+                            continue
+                        d_ = abs(t_.prev[wr_, 0] - opp)
+                        if best is None or d_ < best[0]:
+                            best = (d_, el, wr_)
+                    if best is None:
+                        continue
+                    _, el, wr_ = best
+                    wx, wy = t_.prev[wr_, 0] * W, t_.prev[wr_, 1] * H
+                    ex, ey = t_.prev[el, 0] * W, t_.prev[el, 1] * H
+                    n_ = ((wx - ex) ** 2 + (wy - ey) ** 2) ** 0.5 or 1.0
+                    _arm[s_] = ((wx, wy), ((wx - ex) / n_, (wy - ey) / n_))
+                _wr = {s_: [a_[0]] for s_, a_ in _arm.items()}
+                seen = set()
+                for bx in get_blade_boxes(frame, blade_model, k=2):
+                    cx, cy = (bx[0] + bx[2]) / 2, (bx[1] + bx[3]) / 2
+                    cand = [(min(((wx - cx) ** 2 + (wy - cy) ** 2)
+                                 for wx, wy in v), s_)
+                            for s_, v in _wr.items() if v and s_ not in seen]
+                    if not cand:
+                        continue
+                    _, slot = min(cand)
+                    seen.add(slot)
+                    tip = blade_tip_linefit(frame, bx, _arm[slot][0])
+                    if tip is None:
+                        tip = blade_tip_directed(bx, _arm[slot][0], _arm[slot][1])
+                    if tip is None:
+                        continue
+                    hist = trails[slot]
+                    if hist and (abs(tip[0] - hist[-1][0]) > TRAIL_JUMP * W
+                                 or abs(tip[1] - hist[-1][1]) > TRAIL_JUMP * W):
+                        hist.clear()
+                    elif hist:
+                        px, py = hist[-1]
+                        tip = (0.38 * tip[0] + 0.62 * px, 0.38 * tip[1] + 0.62 * py)
+                    hist.append(tip)
+                for s_ in trails:
+                    if s_ not in seen:
+                        trails[s_].clear()
+                draw_blade_trail(frame, trails, TRAIL_COLORS)
+            elif blade_model is not None:
                 wr = [(t_.prev[w, 0] * W, t_.prev[w, 1] * H)
                       for t_ in tracks.values() for w in (WRIST_L, WRIST_R)
                       if t_.prev[w, 3] >= VISIBILITY_THRESHOLD]

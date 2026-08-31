@@ -38,6 +38,31 @@ def draw_blade_tip(frame: np.ndarray, tip: tuple[float, float] | None) -> np.nda
     return frame
 
 
+def draw_blade_trail(frame, trails, colors, glow=True):
+    """Additive fading ribbon through each blade's recent tip positions."""
+    mask = np.zeros_like(frame)
+    for slot, pts in trails.items():
+        if len(pts) < 2:
+            continue
+        base = colors.get(slot, (255, 255, 255))
+        n = len(pts)
+        for i in range(1, n):
+            age = i / (n - 1)                      # 0 oldest, 1 newest
+            col = tuple(int(c * age ** 0.7) for c in base)
+            cv2.line(mask, (int(pts[i - 1][0]), int(pts[i - 1][1])),
+                     (int(pts[i][0]), int(pts[i][1])), col,
+                     max(2, int(2 + 9 * age)), cv2.LINE_AA)
+    if glow:
+        mask = cv2.GaussianBlur(mask, (0, 0), 7)
+        cv2.convertScaleAbs(mask, dst=mask, alpha=1.5)
+    np.add(frame, mask, out=frame, casting="unsafe")
+    for slot, pts in trails.items():
+        if pts:
+            cv2.circle(frame, (int(pts[-1][0]), int(pts[-1][1])), 6,
+                       colors.get(slot, (255, 255, 255)), -1, cv2.LINE_AA)
+    return frame
+
+
 def draw_action_label(frame: np.ndarray, action: str, confidence: float | None,
                       org: tuple[int, int] = (10, 40),
                       color: tuple[int, int, int] = (0, 200, 255)) -> np.ndarray:

@@ -32,6 +32,18 @@ def get_blade_box(frame: np.ndarray, model: YOLO) -> tuple[float, float, float, 
     return (float(x1), float(y1), float(x2), float(y2))
 
 
+def get_blade_boxes(frame: np.ndarray, model: YOLO, k: int = 2) -> list:
+    """Up to k most confident blade boxes -- usually both fencers' blades."""
+    results = model(frame, conf=MIN_BLADE_CONFIDENCE, verbose=False)
+    boxes = results[0].boxes
+    if boxes is None or len(boxes) == 0:
+        return []
+    conf = boxes.conf.cpu().numpy()
+    order = np.argsort(-conf)[:k]
+    xy = boxes.xyxy.cpu().numpy()
+    return [tuple(float(v) for v in xy[i]) for i in order]
+
+
 def get_blade_centre(frame: np.ndarray, model: YOLO) -> tuple[float, float] | None:
     """Centre of the most confident blade box -- roughly the blade's MIDPOINT, not its tip."""
     box = get_blade_box(frame, model)
@@ -54,6 +66,53 @@ def blade_tip_from_box(box, wrists) -> tuple[float, float] | None:
     cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
     wx, wy = min(wrists, key=lambda w: (w[0] - cx) ** 2 + (w[1] - cy) ** 2)
     return max(corners, key=lambda c: (c[0] - wx) ** 2 + (c[1] - wy) ** 2)
+
+
+def blade_tip_directed(box, wrist, direction) -> tuple[float, float] | None:
+    """Box corner farthest along the arm's pointing direction -- stays on the blade axis."""
+    if box is None or wrist is None or direction is None:
+        return None
+    x1, y1, x2, y2 = box
+    ux, uy = direction
+    wx, wy = wrist
+    corners = ((x1, y1), (x2, y2), (x1, y2), (x2, y1))
+    return max(corners, key=lambda c: (c[0] - wx) * ux + (c[1] - wy) * uy)
+
+
+def blade_axis(frame, box, pad: int = 6):
+    """Fit the blade's line inside its box by PCA on edge pixels: (end1, end2, linearity)."""
+    if box is None:
+        return None
+    H, W = frame.shape[:2]
+    x1 = max(0, int(box[0]) - pad); y1 = max(0, int(box[1]) - pad)
+    x2 = min(W, int(box[2]) + pad); y2 = min(H, int(box[3]) + pad)
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0 or min(crop.shape[:2]) < 8:
+        return None
+    g = cv2.GaussianBlur(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (3, 3), 0)
+    ys, xs = np.nonzero(cv2.Canny(g, 50, 150))
+    if len(xs) < 12:
+        return None
+    P = np.stack([xs, ys], 1).astype(np.float32)
+    mu = P.mean(0)
+    _, S, Vt = np.linalg.svd(P - mu, full_matrices=False)
+    d = Vt[0]
+    t = (P - mu) @ d
+    e1 = mu + d * float(t.min()); e2 = mu + d * float(t.max())
+    return ((float(e1[0] + x1), float(e1[1] + y1)),
+            (float(e2[0] + x1), float(e2[1] + y1)),
+            float(S[0] / (S[1] + 1e-6)))
+
+
+def blade_tip_linefit(frame, box, wrist, min_linearity: float = 1.5):
+    """Far end of the fitted blade line from the hand; None when the fit is not line-like."""
+    got = blade_axis(frame, box)
+    if got is None or wrist is None or got[2] < min_linearity:
+        return None
+    e1, e2, _ = got
+    wx, wy = wrist
+    far = max((e1, e2), key=lambda e: (e[0] - wx) ** 2 + (e[1] - wy) ** 2)
+    return far
 
 
 def get_blade_tip(frame: np.ndarray, model: YOLO, wrists=None) -> tuple[float, float] | None:
