@@ -37,7 +37,8 @@ WRIST_L, WRIST_R = 15, 16
 ELBOW_L, ELBOW_R = 13, 14
 TRAIL_LEN = 30          # ~1 s of tip history
 TRAIL_JUMP = 0.22       # fraction of frame width that breaks the ribbon
-TRAIL_COLORS = {"A": (80, 170, 255), "B": (255, 200, 90)}
+# left red, right green -- the same convention as the lamps and the scoreboard panel
+TRAIL_COLORS = {"A": (48, 48, 255), "B": (64, 235, 64)}
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
 

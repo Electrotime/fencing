@@ -10,8 +10,9 @@ try:
 except ImportError:  # running this file directly from src/
     from pose_pipeline import BODY_CONNECTIONS
 
-BONE_COLOR = (0, 255, 0)
-JOINT_COLOR = (0, 0, 255)
+# neutral so the red/green blade trails carry the left/right coding on their own
+BONE_COLOR = (205, 205, 205)
+JOINT_COLOR = (150, 150, 150)
 TIP_COLOR = (0, 255, 0)
 TEXT_COLOR = (255, 255, 255)
 
@@ -25,7 +26,7 @@ def draw_skeleton(frame: np.ndarray, points: np.ndarray,
         if ok[a] and ok[b]:
             cv2.line(frame, tuple(pts[a]), tuple(pts[b]), color, 2)
     for i in np.where(ok)[0]:
-        cv2.circle(frame, tuple(pts[i]), 3, JOINT_COLOR, -1)
+        cv2.circle(frame, tuple(pts[i]), 2, JOINT_COLOR, -1)
     return frame
 
 
@@ -39,27 +40,36 @@ def draw_blade_tip(frame: np.ndarray, tip: tuple[float, float] | None) -> np.nda
 
 
 def draw_blade_trail(frame, trails, colors, glow=True):
-    """Additive fading ribbon through each blade's recent tip positions."""
-    mask = np.zeros_like(frame)
+    """Luminous ribbon per blade: saturated glow under a hot near-white core."""
+    glow_m = np.zeros_like(frame)
+    core_m = np.zeros_like(frame)
     for slot, pts in trails.items():
         if len(pts) < 2:
             continue
         base = colors.get(slot, (255, 255, 255))
         n = len(pts)
         for i in range(1, n):
-            age = i / (n - 1)                      # 0 oldest, 1 newest
-            col = tuple(int(c * age ** 0.7) for c in base)
-            cv2.line(mask, (int(pts[i - 1][0]), int(pts[i - 1][1])),
-                     (int(pts[i][0]), int(pts[i][1])), col,
-                     max(2, int(2 + 9 * age)), cv2.LINE_AA)
+            age = i / (n - 1)                       # 0 oldest, 1 newest
+            p, q = pts[i - 1], pts[i]
+            a = (int(p[0]), int(p[1])); b = (int(q[0]), int(q[1]))
+            cv2.line(glow_m, a, b, tuple(int(c * age ** 0.6) for c in base),
+                     max(2, int(3 + 11 * age)), cv2.LINE_AA)
+            if age > 0.35:
+                k = (age - 0.35) / 0.65
+                hot = tuple(int(c + (255 - c) * 0.75 * k) for c in base)
+                cv2.line(core_m, a, b, tuple(int(c * k) for c in hot),
+                         max(1, int(1 + 3 * k)), cv2.LINE_AA)
     if glow:
-        mask = cv2.GaussianBlur(mask, (0, 0), 7)
-        cv2.convertScaleAbs(mask, dst=mask, alpha=1.5)
-    np.add(frame, mask, out=frame, casting="unsafe")
+        glow_m = cv2.GaussianBlur(glow_m, (0, 0), 9)
+        core_m = cv2.GaussianBlur(core_m, (0, 0), 2)
+    np.add(frame, glow_m, out=frame, casting="unsafe")
+    np.add(frame, core_m, out=frame, casting="unsafe")
     for slot, pts in trails.items():
         if pts:
-            cv2.circle(frame, (int(pts[-1][0]), int(pts[-1][1])), 6,
-                       colors.get(slot, (255, 255, 255)), -1, cv2.LINE_AA)
+            base = colors.get(slot, (255, 255, 255))
+            hd = (int(pts[-1][0]), int(pts[-1][1]))
+            cv2.circle(frame, hd, 9, tuple(int(c * 0.5) for c in base), -1, cv2.LINE_AA)
+            cv2.circle(frame, hd, 4, (255, 255, 255), -1, cv2.LINE_AA)
     return frame
 
 
