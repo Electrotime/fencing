@@ -311,7 +311,7 @@ Two choices in the rendered clip are worth stating, because both were available 
 - **The segment is chosen by halt density, not accuracy.** It is the tightest cluster of contested halts in the bout, and it is also the model's worst stretch: two of four. Over the full bout it is seven of eleven.
 - **The action model is `verify_m7_h6.pth`, trained with this bout held out.** The shipped checkpoint trains on all seven bouts and would have looked identical while being in-sample.
 
-Visualization inspired by Fencing Visualized (Rhizomatiks x Dentsu Lab Tokyo, SIGGRAPH Asia 2021). Implementation is my own.
+Visualization inspired by [Fencing Visualized](https://rhizomatiks.com/en/work/fencing-tracking-and-visualization-system/) (Rhizomatiks x Dentsu Lab Tokyo, [SIGGRAPH Asia 2021](https://dl.acm.org/doi/abs/10.1145/3478511.3491310)). Implementation is my own.
 
 ## Known limitations
 
