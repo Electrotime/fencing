@@ -14,7 +14,7 @@ On the halts where both scoring lamps fire and the referee must award the touch 
 - Opponent-aware classification: each fencer's features include their opponent's
 - A learned two-term decision rule for parry, worth +13 points of recall at unchanged overall accuracy
 - Mirror augmentation for left- and right-handed fencers, worth 7 points against a matched control
-- Annotated video output with per-fencer overlays
+- Annotated video output with per-fencer overlays, blade-tip trails and a scoreboard panel
 - Leave-one-bout-out evaluation scripts and per-feature ablation controls
 - Scoreboard and lamp reading with no OCR, recovering halt times, which lamps fired, and the scorer
 - A pre-registered right-of-way test, reported alongside the confirmation attempt that missed and a rival hypothesis of my own that failed
@@ -38,6 +38,12 @@ Run inference on a video segment and write an annotated output file:
 
 ```bash
 python scripts/demo_video.py data/raw_video/5.mp4 out.mp4 --start 300 --end 320
+```
+
+With the scoreboard panel and blade trails, on a checkpoint that held this bout out:
+
+```bash
+python scripts/demo_video.py data/raw_video/6.mp4 out.mp4 --start 360 --end 480     --scoreboard --trail --model verify_m7_h6.pth
 ```
 
 Score a model against a labelled interval CSV:
@@ -293,6 +299,19 @@ What remains after that is a genuine but cheap domain gap. Training on the first
 | 393 s | 68.5% | 69.3% |
 
 Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and the curve is flat past about three minutes. The existing corpus is what makes that work: at the smallest slice, target footage alone reaches 27% while the same slice combined with the other venues reaches 61%. Other venues are a prior, not a substitute. The practical consequence is that deploying at a new venue is a labelling task with a small known price rather than a research problem.
+
+## Demo video
+
+`demo_video.py --scoreboard --trail` renders the whole pipeline onto the broadcast: pose skeletons, the per-fencer action label, a luminous trail through each blade's tip, and a panel showing live lamp states with the referee's call and the model's at every contested halt.
+
+The blade trail needs no extra annotation. The detector gives a box, and a blade is a thin bright object inside it, so its axis comes from a PCA fit on the box's edge pixels and the tip is the far end from the hand. That fit fails on the 640x640 training exports, where the blade is about a pixel wide, and works on the 1080p frames inference actually sees — the trail falls back to a box corner when the fit is not line-like. Trails are red on the left and green on the right, matching the lamps.
+
+Two choices in the rendered clip are worth stating, because both were available to game and neither was:
+
+- **The segment is chosen by halt density, not accuracy.** It is the tightest cluster of contested halts in the bout, and it is also the model's worst stretch: two of four. Over the full bout it is seven of eleven.
+- **The action model is `verify_m7_h6.pth`, trained with this bout held out.** The shipped checkpoint trains on all seven bouts and would have looked identical while being in-sample.
+
+Visualization inspired by Fencing Visualized (Rhizomatiks x Dentsu Lab Tokyo, SIGGRAPH Asia 2021). Implementation is my own.
 
 ## Known limitations
 
