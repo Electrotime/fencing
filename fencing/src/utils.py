@@ -62,8 +62,9 @@ def draw_blade_trail(frame, trails, colors, glow=True):
     if glow:
         glow_m = cv2.GaussianBlur(glow_m, (0, 0), 9)
         core_m = cv2.GaussianBlur(core_m, (0, 0), 2)
-    np.add(frame, glow_m, out=frame, casting="unsafe")
-    np.add(frame, core_m, out=frame, casting="unsafe")
+    # cv2.add SATURATES; np.add on uint8 wraps, which turned the red trail green
+    cv2.add(frame, glow_m, dst=frame)
+    cv2.add(frame, core_m, dst=frame)
     for slot, pts in trails.items():
         if pts:
             base = colors.get(slot, (255, 255, 255))
