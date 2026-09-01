@@ -304,9 +304,7 @@ Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and t
 
 `demo_video.py --scoreboard --trail` renders the whole pipeline onto the broadcast: pose skeletons, the per-fencer action label, a luminous trail through each blade's tip, and a panel showing live lamp states with the referee's call and the model's at every contested halt.
 
-The blade trail needs no extra annotation. The detector gives a box, and a blade is a thin bright object inside it, so its axis comes from a PCA fit on the box's edge pixels and the tip is the far end from the hand. That fit fails on the 640x640 training exports, where the blade is about a pixel wide, and works on the 1080p frames inference actually sees — the trail falls back to a box corner when the fit is not line-like. Trails are red on the left and green on the right, matching the lamps.
-
-Two choices in the rendered clip are worth stating, because both were available to game and neither was:
+The detector gives a box, and a blade is a thin bright object inside it, so its axis comes from a PCA fit on the box's edge pixels and the tip is the far end from the hand. That fit fails on the 640x640 training exports, where the blade is about a pixel wide, and works on the 1080p frames inference actually sees — the trail falls back to a box corner when the fit is not line-like. Trails are red on the left and green on the right, matching the lamps.
 
 - **The segment is chosen by halt density, not accuracy.** It is the tightest cluster of contested halts in the bout, and it is also the model's worst stretch: two of four. Over the full bout it is seven of eleven.
 - **The action model is `verify_m7_h6.pth`, trained with this bout held out.** The shipped checkpoint trains on all seven bouts and would have looked identical while being in-sample.
