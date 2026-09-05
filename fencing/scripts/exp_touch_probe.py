@@ -14,7 +14,7 @@ import check_touches as CT
 import read_scoreboard as RS
 
 LAB = PROJECT / "data" / "labels"
-CACHE = {s: f"{s}_probs_mirror.npz" for s in ("1","4","5","6","7","8","9","10")}
+CACHE = {s: f"{s}_probs_mirror.npz" for s in ("1","4","5","6","7","8","9","10","11","12")}
 BACKS = (1.0, 2.0, 3.0, 4.0)
 POOLS = ("max", "mean")
 

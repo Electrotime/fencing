@@ -1,0 +1,59 @@
+# Difficulty pass. Aaron, 2026-08-30. Mark each halt `clear` or `50-50` from the
+# VIDEO ONLY -- no model output, no README numbers, no demo. One pass, do not revisit.
+# `clear`  = watching it, the referee's call is the obvious one.
+# `50-50`  = genuinely could have gone either way.
+# Leave `difficulty` blank to skip a halt. Bouts 5 and 6 are excluded on purpose:
+# bout 6's demo halts are the only ones whose per-halt result Aaron has seen.
+bout	time	mm:ss	kind	difficulty
+8	33.199	00:33.199	two_colour	
+8	128.528	02:08.528	two_colour	
+8	276.676	04:36.676	two_colour	
+8	297.396	04:57.396	mixed	
+8	482.648	08:02.648	two_colour	
+8	551.717	09:11.717	mixed	
+8	581.547	09:41.547	two_colour	
+8	680.245	11:20.245	mixed	
+9	10.510	00:10.510	mixed	
+9	110.944	01:50.944	mixed	
+9	159.259	02:39.259	two_colour	
+9	224.090	03:44.090	mixed	
+9	303.569	05:03.569	two_colour	
+9	689.422	11:29.422	mixed	
+9	731.764	12:11.764	two_colour	
+9	807.306	13:27.306	two_colour	
+9	854.019	14:14.019	two_colour	
+9	907.706	15:07.706	two_colour	
+9	954.420	15:54.420	two_colour	
+9	988.620	16:28.620	two_colour	
+9	1023.589	17:03.589	two_colour	
+10	9.776	00:09.776	two_colour	
+10	56.589	00:56.589	two_colour	
+10	77.911	01:17.911	two_colour	
+10	93.493	01:33.493	two_colour	
+10	332.999	05:32.999	two_colour	
+10	387.887	06:27.887	two_colour	
+10	444.477	07:24.477	mixed	
+10	483.850	08:03.850	two_colour	
+10	498.064	08:18.064	two_colour	
+10	535.001	08:55.001	mixed	
+10	570.569	09:30.569	two_colour	
+10	609.208	10:09.208	mixed	
+10	706.772	11:46.772	two_colour	
+10	777.876	12:57.876	two_colour	
+10	821.787	13:41.787	two_colour	
+11	85.018	01:25.018	two_colour	
+11	123.088	02:03.088	two_colour	
+11	150.550	02:30.550	two_colour	
+11	327.593	05:27.593	two_colour	
+11	460.593	07:40.593	two_colour	
+11	489.555	08:09.555	two_colour	
+11	500.867	08:20.867	two_colour	
+11	510.910	08:30.910	two_colour	
+11	521.020	08:41.020	two_colour	
+11	557.490	09:17.490	two_colour	
+11	743.008	12:23.008	two_colour	
+12	207.307	03:27.307	mixed	
+12	268.735	04:28.735	mixed	
+12	446.345	07:26.345	two_colour	
+12	589.689	09:49.689	two_colour	
+12	786.952	13:06.952	two_colour	
