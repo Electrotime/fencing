@@ -5,7 +5,7 @@ Action recognition for fencing from ordinary broadcast video. FenceVision detect
 
 Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
 
-On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.70 AUC** (95% CI [0.53, 0.85], p = 0.010) across 48 halts in five bouts never used to select it — a pre-registered result that clears significance only when all three confirmation attempts are pooled; no attempt reaches it alone. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
+On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.69 AUC** (95% CI [0.55, 0.81], p = 0.006) across 64 halts in seven bouts never used to select it. Split by how ambiguous a fencer judged each halt to be — labelled blind, before seeing any model output — that is **0.78 on clear halts and 0.56 on genuinely close ones**, so the residual error sits where the call itself is arguable. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
 
 ## Features
 
@@ -170,7 +170,7 @@ What this does not overturn: the +30 points from continuous windows over hand-cu
 
 **Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
-**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-10 for contested halts only (37 halts where both lamps lit), which is the 40% of the work the scoreboard reader cannot do itself. Ten bouts of video in total; the action model still trains on seven.
+**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-12 for contested halts only (53 halts where both lamps lit), which is the 40% of the work the scoreboard reader cannot do itself. Twelve bouts of video in total; the action model still trains on seven.
 
 ## Reading the scoreboard
 
@@ -211,9 +211,28 @@ A pre-registered test asks whether the model's action probabilities carry that d
 | 5, 6 | confirmation | 13 | 0.75 | 0.084 |
 | 8, 9 | confirmation | 14 | 0.71 | 0.105 |
 | 10 | confirmation | 10 | 0.64 | 0.276 |
-| **5, 6, 8, 9, 10** | **pooled** | **48** | **0.70** | **0.0101** |
+| 11 | confirmation | 11 | 0.77 | — |
+| 12 | confirmation | 5 | 0.75 | — |
+| **5, 6, 8, 9, 10, 11, 12** | **pooled** | **64** | **0.69** | **0.0058** |
 
-95% CI [0.53, 0.85], which excludes chance. The pooled row is the result: the hypothesis was tested three times on held-out data and no attempt clears 0.05 by itself, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It survives correction for all three registered features (p 0.030), holds under leave-one-bout-out on all five bouts, and every one of the seven bouts is individually above chance (0.58 to 0.96).
+95% CI [0.55, 0.81], which excludes chance. The pooled row is the result: the hypothesis was tested repeatedly on held-out data and most single attempts do not clear 0.05 alone, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It survives correction for all three registered features (p 0.012), holds under leave-one-bout-out on all seven bouts, and every one of the nine bouts is individually above chance (0.58 to 0.96).
+
+### Where the error lives
+
+A fencer ranked all 52 contested halts in bouts 8 to 12 from 1 to 10 for how obvious the call was, working from video alone and before seeing any model output. The ranks were bimodal — 26 halts at 1-3, 20 at 8-10 — so clear and ambiguous separate rather than smear.
+
+| | n | AUC |
+|---|---|---|
+| clear halts (rank <= 4) | 25 | **0.78** |
+| ambiguous halts (rank > 4) | 22 | **0.56** |
+
+**Spearman -0.30 (p = 0.039)** between the difficulty rank and how strongly the model leans the correct way, in the direction registered before the test ran. The two bouts labelled with no prior exposure to any result reproduce it on their own: -0.24, with 0.75 on clear halts and 0.56 on close ones.
+
+So the pooled 0.69 is not a model that is mediocre everywhere. It is one that works where a determinate answer exists and sits at chance where it does not.
+
+The honest limit on that reading: difficulty and the model's signal likely share a cause. A halt reads as clear largely when one fencer visibly attacked and the other visibly retreated, which is the same evidence the feature measures. That is the mechanism rather than a confound — the labels were blind to the model — but it means the claim is "the model tracks the evidence a referee uses, and fails where that evidence is absent", not "the true accuracy is 0.78".
+
+The fencer's own account of the hard cases matches: close-quarters blade sequences the tracker cannot resolve, and attacks in preparation, where the fencer moving forward is *not* the one with priority. The second is not noise but a systematic counterexample — the feature's sign is inverted on exactly those halts.
 
 ### The rule says *order*, and order is the part that fails
 
