@@ -1,0 +1,50 @@
+# Two-light halts only. Aaron, 2026-09-06. TEAM RELAY -- fencers change between
+# legs, so the score is the cumulative TEAM score. `Side Awarded` is who the referee
+# gave the action to, i.e. who held PRIORITY -- not necessarily who scored: on a
+# mixed halt an off-target hit by the priority holder annuls and nothing is awarded.
+# Blank = nothing awarded (both off target). NA = referee gave no priority.
+# Single-lamp halts are absent by design, so Score JUMPS and is NOT a checksum here.
+Score	Time stamp	Left	Right	Side Awarded
+1:0	00:16.916	valid	off target	left
+1:1	01:02.328	valid	valid	right
+4:1	01:50.710	valid	valid	left
+4:3	02:39.859	valid	valid	right
+5:4	04:51.491	valid	valid	right
+8:5	06:51.377	valid	valid	left
+9:8	09:51.090	valid	valid	right
+11:11	13:27.039	off target	valid	left
+15:14	17:28.547	off target	off target	
+16:15	18:19.231	valid	valid	left
+17:15	19:17.789	valid	valid	left
+17:16	19:42.340	valid	valid	right
+17:17	21:15.040	valid	valid	right
+18:17	21:31.990	valid	valid	left
+18:17	22:41.927	valid	off target	right
+18:17	23:33.812	valid	off target	right
+19:18	24:41.713	valid	valid	right
+19:19	25:47.479	valid	valid	NA
+19:20	27:21.500	off target	valid	right
+21:23	29:35.934	valid	valid	right
+23:25	31:14.172	valid	valid	right
+23:27	33:25.570	valid	valid	right
+24:27	33:54.999	valid	valid	left
+26:27	34:45.383	valid	valid	left
+27:28	36:07.999	valid	valid	left
+28:28	36:32.323	valid	off target	left
+29:28	37:03.988	valid	off target	right
+29:29	37:33.384	valid	valid	right
+30:29	38:13.766	valid	valid	left
+30:29	39:22.467	valid	valid	NA
+31:31	40:06.270	off target	valid	right
+31:32	40:20.384	off target	valid	right
+32:33	41:26.951	valid	valid	right
+32:34	43:35.712	valid	off target	right
+32:35	44:11.315	valid	valid	right
+32:35	45:45.309	valid	off target	right
+32:36	47:03.587	off target	valid	left
+33:38	48:52.428	valid	valid	left
+34:38	49:56.793	valid	valid	left
+36:39	52:26.877	valid	valid	left
+36:41	53:53.730	valid	valid	right
+37:42	54:44.280	valid	valid	left
+37:43	54:56.259	valid	valid	right

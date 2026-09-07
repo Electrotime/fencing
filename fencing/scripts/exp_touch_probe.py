@@ -14,7 +14,7 @@ import check_touches as CT
 import read_scoreboard as RS
 
 LAB = PROJECT / "data" / "labels"
-CACHE = {s: f"{s}_probs_mirror.npz" for s in ("1","4","5","6","7","8","9","10","11","12")}
+CACHE = {s: f"{s}_probs_mirror.npz" for s in ("1","4","5","6","7","8","9","10","11","12","13","14")}
 BACKS = (1.0, 2.0, 3.0, 4.0)
 POOLS = ("max", "mean")
 
@@ -58,6 +58,17 @@ ONSET_PREREG = "advance onset lead (A first) @4s"
 # model was trained at 60 frames, so 25 is off-distribution. That is the cost of
 # the only resolution test available without retraining.
 ONSET_SHORT_PREREG = "advance onset lead (A first) @4s [25-frame window]"
+
+# Registered 2026-09-06, BEFORE any phrase label exists, from Aaron's account of the
+# hard cases. The feature is "who advanced more". In an ATTACK IN PREPARATION the
+# fencer moving FORWARD is prepping and LOSES priority to the one moving back who
+# lunges into it, so the feature does not merely go quiet on these halts -- its sign
+# is INVERTED. Prediction, one-sided and falsifiable: AUC on attack-in-prep halts is
+# BELOW 0.5, not merely near it. A result of ~0.5 refutes this and means those halts
+# are only uninformative, not adversarial.
+# The other named failure, close-quarters blade sequences, is a PERCEPTION limit and
+# carries no sign prediction: expect ~0.5 there.
+PHRASE_PREREG = "attack-in-prep AUC < 0.5 (feature sign inverted)"
 
 ADVISORY = ("checksum cannot run", "checksum seeded from here", "a row is probably missing")
 

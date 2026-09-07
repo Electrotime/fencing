@@ -18,7 +18,7 @@ LAB = PROJECT / "data" / "labels"
 # Lamp-derived bouts read priority off the scoreboard; contested bouts have it
 # by hand. Bouts 4 and 7 are excluded: the feature was chosen on them.
 LAMP = ("5", "6")
-HAND = ("8", "9", "10", "11", "12")
+HAND = ("8", "9", "10", "11", "12", "13", "14")
 
 
 def rows_for(stem):
