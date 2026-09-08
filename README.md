@@ -5,7 +5,7 @@ Action recognition for fencing from ordinary broadcast video. FenceVision detect
 
 Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
 
-On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.69 AUC** (95% CI [0.55, 0.81], p = 0.006) across 64 halts in seven bouts never used to select it. Split by how ambiguous a fencer judged each halt to be — labelled blind, before seeing any model output — that is **0.78 on clear halts and 0.56 on genuinely close ones**, so the residual error sits where the call itself is arguable. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
+On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.64 AUC** (95% CI [0.54, 0.74], p = 0.004) across 117 halts in nine bouts never used to select it. Split by how ambiguous a fencer judged each halt to be — labelled blind, before seeing any model output — that is **0.78 on clear halts and 0.56 on genuinely close ones**, so the residual error sits where the call itself is arguable. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
 
 ## Features
 
@@ -170,7 +170,7 @@ What this does not overturn: the +30 points from continuous windows over hand-cu
 
 **Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
-**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-12 for contested halts only (53 halts where both lamps lit), which is the 40% of the work the scoreboard reader cannot do itself. Twelve bouts of video in total; the action model still trains on seven.
+**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-14 for contested halts only (106 halts where both lamps lit), which is the 40% of the work the scoreboard reader cannot do itself. Fourteen bouts of video in total; the action model still trains on seven.
 
 ## Reading the scoreboard
 
@@ -213,13 +213,18 @@ A pre-registered test asks whether the model's action probabilities carry that d
 | 10 | confirmation | 10 | 0.64 | 0.276 |
 | 11 | confirmation | 11 | 0.77 | — |
 | 12 | confirmation | 5 | 0.75 | — |
-| **5, 6, 8, 9, 10, 11, 12** | **pooled** | **64** | **0.69** | **0.0058** |
+| 13, 14 | confirmation | 53 | held | — |
+| **5, 6, 8-14** | **pooled** | **117** | **0.64** | **0.0039** |
 
-95% CI [0.55, 0.81], which excludes chance. The pooled row is the result: the hypothesis was tested repeatedly on held-out data and most single attempts do not clear 0.05 alone, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It survives correction for all three registered features (p 0.012), holds under leave-one-bout-out on all seven bouts, and every one of the nine bouts is individually above chance (0.58 to 0.96).
+95% CI [0.54, 0.74], which excludes chance. The pooled row is the result: the hypothesis was tested repeatedly on held-out data and most single attempts do not clear 0.05 alone, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It survives correction for all three registered features (p 0.008) and holds under leave-one-bout-out on every bout.
+
+The per-bout figures for bouts 13 and 14 are withheld while a phrase-type labelling pass on them is still open, because seeing them could bias those labels. They are in the pooled row.
+
+**The estimate has fallen every time data was added: 0.83 on discovery, then 0.72, 0.70, 0.69, 0.64.** That is what an inflated discovery estimate looks like as it regresses, and 0.64 is the most trustworthy figure here because it rests on the most data. Precision improved at the same time — the interval is now 0.20 wide against 0.26, and p is the lowest it has been. The effect is more certainly real and smaller than earlier versions of this file claimed.
 
 ### Where the error lives
 
-A fencer ranked all 52 contested halts in bouts 8 to 12 from 1 to 10 for how obvious the call was, working from video alone and before seeing any model output. The ranks were bimodal — 26 halts at 1-3, 20 at 8-10 — so clear and ambiguous separate rather than smear.
+A fencer ranked all 52 contested halts in bouts 8 to 12 from 1 to 10 for how obvious the call was (bouts 13 and 14 are not yet ranked), working from video alone and before seeing any model output. The ranks were bimodal — 26 halts at 1-3, 20 at 8-10 — so clear and ambiguous separate rather than smear.
 
 | | n | AUC |
 |---|---|---|
