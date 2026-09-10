@@ -170,7 +170,7 @@ What this does not overturn: the +30 points from continuous windows over hand-cu
 
 **Dataset:** 7 bouts across 4 venues, 3050 seconds of hand-labelled footage, 1365 labelled intervals, 16300 training windows. Only 126 seconds are `parry`, which is the main source of difficulty.
 
-**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-14 for contested halts only (106 halts where both lamps lit), which is the 40% of the work the scoreboard reader cannot do itself. Fourteen bouts of video in total; the action model still trains on seven.
+**Touch outcomes** are labelled separately from actions: bouts 4-7 exhaustively (159 halts, every stoppage including off-target), bouts 8-14 for contested halts only (110 halts where both lamps lit, 105 of them carrying a priority call), which is the 40% of the work the scoreboard reader cannot do itself. Fourteen bouts of video in total; the action model still trains on seven.
 
 ## Reading the scoreboard
 
@@ -356,7 +356,9 @@ fencing/
                read_scoreboard.py (lamps, halts, score digits),
                check_touches.py (touch-table validator),
                label_worklist.py (contested-halt worklist),
-               exp_touch_probe.py / exp_contested.py (right-of-way tests),
+               exp_touch_probe.py / exp_contested.py / exp_priority.py
+               (right-of-way tests), exp_pooled.py (pooled confirmation),
+               scoreboard_overlay.py (demo panel: lamps, referee, model),
                bout_stats.py (per-bout report),
                venue_motion.py, bout_timeline.py
   data/        raw_video/, labels/ (interval CSVs), train_continuous/ (cached windows)
