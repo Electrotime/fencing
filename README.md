@@ -226,18 +226,16 @@ Where that leaves it: an effect that is probably real, around 0.6, on a sample s
 
 ### Where the error lives
 
-A fencer ranked all 52 contested halts in bouts 8 to 12 from 1 to 10 for how obvious the call was (bouts 13 and 14 are not yet ranked), working from video alone and before seeing any model output. The ranks were bimodal — 26 halts at 1-3, 20 at 8-10 — so clear and ambiguous separate rather than smear.
+A fencer also ranked every contested halt 1 to 10 for how obvious the call was, from video alone and before seeing any model output.
 
 | | n | AUC |
 |---|---|---|
-| clear halts (rank <= 4) | 25 | **0.78** |
-| ambiguous halts (rank > 4) | 22 | **0.56** |
+| clear halts (rank <= 4) | 46 | **0.70** |
+| ambiguous halts (rank > 4) | 40 | **0.49** |
 
-**Spearman -0.30 (p = 0.039)** between the difficulty rank and how strongly the model leans the correct way, in the direction registered before the test ran. The two bouts labelled with no prior exposure to any result reproduce it on their own: -0.24, with 0.75 on clear halts and 0.56 on close ones.
+Spearman is **-0.20 (p = 0.068)** between the rank and how strongly the model leans the correct way, in the direction registered before the test ran. On the first five bouts alone it was -0.30 at p = 0.039; adding the sixth halved the correlation and pushed it past 0.05. Treat it as consistent with the phrase result rather than as independent evidence.
 
-So the pooled 0.69 is not a model that is mediocre everywhere. It is one that works where a determinate answer exists and sits at chance where it does not.
-
-The honest limit on that reading: difficulty and the model's signal likely share a cause. A halt reads as clear largely when one fencer visibly attacked and the other visibly retreated, which is the same evidence the feature measures. That is the mechanism rather than a confound — the labels were blind to the model — but it means the claim is "the model tracks the evidence a referee uses, and fails where that evidence is absent", not "the true accuracy is 0.78".
+The honest limit on this reading: difficulty and the model's signal share a cause. A halt reads as clear largely when one fencer visibly attacked and the other visibly retreated, which is the same evidence the feature measures. That is the mechanism rather than a confound — the labels were blind to the model — but it means the claim is "the model tracks the evidence a referee uses, and fails where that evidence is absent", not "the true accuracy is 0.70". The phrase breakdown above says the same thing with the mechanism named, which is why it is the better statement of the two.
 
 The fencer's own account of the hard cases matches: close-quarters blade sequences the tracker cannot resolve, and attacks in preparation, where the fencer moving forward is *not* the one with priority. The second is not noise but a systematic counterexample — the feature's sign is inverted on exactly those halts.
 
