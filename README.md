@@ -5,7 +5,7 @@ Action recognition for fencing from ordinary broadcast video. FenceVision detect
 
 Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
 
-On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.61 AUC** (95% CI [0.50, 0.72], p = 0.026) across 104 halts in eight bouts never used to select it. That clears 0.05 on its own but **not** after correcting for the three registered features (p = 0.077), so it is suggestive rather than established. Split by how ambiguous a fencer judged each halt to be — labelled blind, before seeing any model output — that is **0.78 on clear halts and 0.56 on genuinely close ones**, so the residual error sits where the call itself is arguable. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
+On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.61 AUC** (95% CI [0.50, 0.72], p = 0.026) across 104 halts in eight bouts never used to select it. That clears 0.05 on its own but **not** after correcting for the three registered features (p = 0.077), so it is suggestive rather than established. That average hides the useful part. Split by what kind of action the halt was — labelled by a fencer from video, before seeing any model output — it is **0.84 where one fencer clearly attacks and the other retreats**, and at or below chance on every other kind. The method has a boundary, and it falls where right of way stops being decided by who went forward. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
 
 ## Features
 
@@ -240,6 +240,25 @@ So the pooled 0.69 is not a model that is mediocre everywhere. It is one that wo
 The honest limit on that reading: difficulty and the model's signal likely share a cause. A halt reads as clear largely when one fencer visibly attacked and the other visibly retreated, which is the same evidence the feature measures. That is the mechanism rather than a confound — the labels were blind to the model — but it means the claim is "the model tracks the evidence a referee uses, and fails where that evidence is absent", not "the true accuracy is 0.78".
 
 The fencer's own account of the hard cases matches: close-quarters blade sequences the tracker cannot resolve, and attacks in preparation, where the fencer moving forward is *not* the one with priority. The second is not noise but a systematic counterexample — the feature's sign is inverted on exactly those halts.
+
+### Where the method stops working
+
+A fencer labelled every contested halt with the kind of action it was, from video alone, before seeing any model output. The four categories were fixed in advance, and each carried its own prediction about what the feature should do.
+
+| phrase | n | AUC | mean \|z\| | median difficulty |
+|---|---|---|---|---|
+| **clean** — one attacks, one retreats | 35 | **0.84** | 0.99 | 2 |
+| **close-blade** — close quarters, blade exchanges | 27 | **0.52** | 0.77 | 7 |
+| **both attack** — both go forward, fine margin | 17 | **0.38** | 0.65 | 8 |
+| **attack in preparation** — priority to the fencer moving back | 7 | **0.17** | 0.55 | 9 |
+
+**The pooled 0.61 is a mixture, not a level.** Two fifths of contested halts are clean, and there the feature does most of what could be asked of it. On the rest it is at chance or worse.
+
+The two chance-level categories fail for opposite reasons, and the feature's *magnitude* separates them. This was registered before the labels existed: on `both attack` halts both fencers advance, so the difference cancels and the signal should be small — it is, 0.65 against 0.99 for clean. On `close-blade` halts the signal is full size (0.77) and simply points the wrong way as often as the right way, which is what a perception limit looks like rather than a cancellation.
+
+`attack in preparation` is the sharpest case and the least established. The rule inverts the feature: the fencer moving forward is preparing, and loses priority to the one who moves back and lunges into it. The prediction registered in advance was AUC **below** 0.5, not merely near it, and 0.17 is the lowest figure in this project. But **n = 7**, one-sided p = 0.11, so the direction is right and the claim is not yet earned. It needs roughly three times the halts.
+
+Both failures are structural rather than statistical. No amount of extra footage fixes a feature whose sign is wrong on a class of action, and no window length recovers blade work the tracker cannot see.
 
 ### The rule says *order*, and order is the part that fails
 

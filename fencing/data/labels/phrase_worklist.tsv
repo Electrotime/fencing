@@ -79,43 +79,43 @@ bout	time	mm:ss	kind	awarded	phrase	difficulty	agree
 13	777.710	12:57.710	two_colour	right			
 13	811.844	13:31.844	two_colour	right			
 13	846.846	14:06.846	two_colour	left			
-14	16.916	00:16.916	mixed	left			
-14	62.328	01:02.328	two_colour	right			
-14	110.710	01:50.710	two_colour	left			
-14	159.859	02:39.859	two_colour	right			
-14	291.491	04:51.491	two_colour	right			
-14	411.377	06:51.377	two_colour	left			
-14	591.090	09:51.090	two_colour	right			
-14	807.039	13:27.039	mixed	left			
-14	1099.231	18:19.231	two_colour	left			
-14	1157.789	19:17.789	two_colour	left			
-14	1182.340	19:42.340	two_colour	right			
-14	1275.040	21:15.040	two_colour	right			
-14	1291.990	21:31.990	two_colour	left			
-14	1361.927	22:41.927	mixed	right			
-14	1413.812	23:33.812	mixed	right			
-14	1481.713	24:41.713	two_colour	right			
-14	1641.500	27:21.500	mixed	right			
-14	1775.934	29:35.934	two_colour	right			
-14	1874.172	31:14.172	two_colour	right			
-14	2005.570	33:25.570	two_colour	right			
-14	2034.999	33:54.999	two_colour	left			
-14	2085.383	34:45.383	two_colour	left			
-14	2167.999	36:07.999	two_colour	left			
-14	2192.323	36:32.323	mixed	left			
-14	2223.988	37:03.988	mixed	right			
-14	2253.384	37:33.384	two_colour	right			
-14	2293.766	38:13.766	two_colour	left			
-14	2406.270	40:06.270	mixed	right			
-14	2420.384	40:20.384	mixed	right			
-14	2486.951	41:26.951	two_colour	right			
-14	2615.712	43:35.712	mixed	right			
-14	2651.315	44:11.315	two_colour	right			
-14	2745.309	45:45.309	mixed	right			
-14	2823.587	47:03.587	mixed	left			
-14	2932.428	48:52.428	two_colour	left			
-14	2996.793	49:56.793	two_colour	left			
-14	3146.877	52:26.877	two_colour	left			
-14	3233.730	53:53.730	two_colour	right			
-14	3284.280	54:44.280	two_colour	left			
-14	3296.259	54:56.259	two_colour	right			
+14	16.916	00:16.916	mixed	left	h and s	7	
+14	62.328	01:02.328	two_colour	right	c	2	
+14	110.710	01:50.710	two_colour	left	c (could be s) 3	
+14	159.859	02:39.859	two_colour	right	h and s	10	
+14	291.491	04:51.491	two_colour	right	s	4	
+14	411.377	06:51.377	two_colour	left	c (could be h) 7		
+14	591.090	09:51.090	two_colour	right	h	5	
+14	807.039	13:27.039	mixed	left	h	2	
+14	1099.231	18:19.231	two_colour	left c (could be h) 4
+14	1157.789	19:17.789	two_colour	left	s	7	
+14	1182.340	19:42.340	two_colour	right	h (could be c)	9	
+14	1275.040	21:15.040	two_colour	right	h (could be c)	2	
+14	1291.990	21:31.990	two_colour	left	s (could be c)	3	
+14	1361.927	22:41.927	mixed	right	s	10	
+14	1413.812	23:33.812	mixed	right	c (could very well be s) 2		
+14	1481.713	24:41.713	two_colour	right	c (could very well be s, maybe even h, most likely s) 2		
+14	1641.500	27:21.500	mixed	right	h	6	
+14	1775.934	29:35.934	two_colour	right	c (could be h/s)	2	
+14	1874.172	31:14.172	two_colour	right	c	1	
+14	2005.570	33:25.570	two_colour	right	h	1	
+14	2034.999	33:54.999	two_colour	left	c	1	
+14	2085.383	34:45.383	two_colour	left	h	2	
+14	2167.999	36:07.999	two_colour	left	a (could very well be s)	8	
+14	2192.323	36:32.323	mixed	left	c	1	
+14	2223.988	37:03.988	mixed	right	h	9	
+14	2253.384	37:33.384	two_colour	right	a	9	
+14	2293.766	38:13.766	two_colour	left	c	2	
+14	2406.270	40:06.270	mixed	right	a (could be s)	8	
+14	2420.384	40:20.384	mixed	right	h	9	
+14	2486.951	41:26.951	two_colour	right	s	8	
+14	2615.712	43:35.712	mixed	right	h	2	
+14	2651.315	44:11.315	two_colour	right	s	9	
+14	2745.309	45:45.309	mixed	right	h	9	
+14	2823.587	47:03.587	mixed	left	h	9	
+14	2932.428	48:52.428	two_colour	left	c	1	
+14	2996.793	49:56.793	two_colour	left	h (could be s)	2	
+14	3146.877	52:26.877	two_colour	left	c	1	
+14	3233.730	53:53.730	two_colour	right	c	1	
+14	3284.280	54:44.280	two_colour	left	c and h	4	
+14	3296.259	54:56.259	two_colour	right	h and s 8		
