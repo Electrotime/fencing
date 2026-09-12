@@ -1,0 +1,45 @@
+# EVERY halt the motion detector found in data/raw_video/8.mp4 -- single-light ones included.
+# Rows already in bout8_contested.tsv come pre-filled; the blanks are
+# the single-light halts, which need the referee's call too.
+# Set `real` to n if the row is a false alarm, and add a row for any
+# halt the detector missed.
+# Lights: left / right / both / mixed / none.  Call: left / right / none.
+real	Time stamp	Lights	Call
+y	0:07		
+y	0:19		
+y	0:32	both	left
+y	0:45		
+y	1:29		
+y	1:44		
+y	2:00		
+y	2:08	both	right
+y	2:39		
+y	2:57		
+y	3:12		
+y	3:22		
+y	4:09		
+y	4:21		
+y	4:36	both	left
+y	4:49		
+y	4:57	both	left
+y	5:20		
+y	5:47		
+y	5:57		
+y	6:06		
+y	6:14		
+y	6:29		
+y	6:50		
+y	7:02		
+y	7:29		
+y	7:48		
+y	8:03	both	left
+y	8:22		
+y	8:30		
+y	9:12	both	left
+y	9:21		
+y	9:42	both	right
+y	9:56		
+y	10:35		
+y	10:46		
+y	10:54		
+y	11:20	both	left

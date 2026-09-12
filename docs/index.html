@@ -133,9 +133,10 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
 }
 @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
 </style>
-
 </head>
 <body>
+
+
 <div class="wrap">
 <header>
   <p class="eyebrow" style="margin-bottom:18px">Foil &middot; broadcast video &middot; pose + scoreboard</p>
@@ -238,6 +239,24 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
     </tbody>
   </table>
   <p class="col" style="margin-top:20px">Fifty-four percent of touches are single-lamp, where the lamp alone names the scorer. Hand labelling drops to the contested remainder &mdash; 40% of the work.</p>
+</section>
+
+<section>
+  <p class="eyebrow">Halt detection</p>
+  <h2>Finding halts with the graphics switched off</h2>
+  <p class="col">Locating the lamp box is the one thing that has to be redone for every new broadcast. A second detector removes it by ignoring the overlay entirely and watching the fencers, because a halt has a shape: <strong>fencing, then walking</strong>.</p>
+  <p class="col">That second word is the whole trick, and it is not what I first tried. Quiet does not mean <em>still</em> &mdash; after a halt the pair walk back to en garde. Scoring stillness as &ldquo;not neutral&rdquo; finds 5% of halts. Scoring it as &ldquo;the fencing classes stop&rdquo; finds the table below. The signal is the action classifier's own output: probability mass on advance, lunge, parry and retreat, run through a matched filter that wants 2&nbsp;s of fencing followed by 3&nbsp;s of walking. Five numbers, fitted on four bouts, then frozen.</p>
+  <table>
+    <thead><tr><th>Bouts</th><th>Halts</th><th>Found</th><th>By chance</th><th>Precision</th></tr></thead>
+    <tbody>
+      <tr><td>4&ndash;7 &middot; tuning</td><td class="n">238</td><td class="n">71%</td><td class="n" style="color:var(--chance)">40%</td><td class="n">70%</td></tr>
+      <tr><td>8&ndash;14 &middot; <strong>held out</strong></td><td class="n">96</td><td class="n">98%</td><td class="n" style="color:var(--chance)">39%</td><td class="n" style="color:var(--muted)">not measurable</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <p><strong>The chance column is the point.</strong> Detections land every 8&ndash;20 seconds, so a &plusmn;4&nbsp;s match window catches about 39% of halts even with the detections scattered at random. Every bout beats its own baseline (p &lt; 0.005), but recall quoted alone would be badly misleading.</p>
+    <p><strong>And 98% means less than it looks like.</strong> The held-out ground truth lists two-light halts only &mdash; the contested ones, which follow the longest exchanges and are the easiest to find. With no exhaustive halt table, a detection matching nothing may be a real single-light halt rather than a false alarm, so precision cannot be computed there at all. 70% on the tuning bouts is the only honest figure, and the next labelling pass is built to fix that.</p>
+  </div>
 </section>
 
 <section>

@@ -199,6 +199,26 @@ Two things it does not do. Off-target hits show a **white** lamp: one production
 
 The practical output is that hand-labelling drops to the contested halts only — the ones where both lamps lit: **64 of 159 halts, 40% of the work**, being 38 where both lamps showed colour and 26 mixing colour with white.
 
+
+### Finding halts without the scoreboard
+
+Locating the lamp box is the one thing that has to be redone per broadcast. A second detector removes it by ignoring the graphics entirely and watching the fencers: a halt is **fencing, then walking**.
+
+That second word is the whole trick, and it is not what I first tried. Quiet does not mean *still* — after a halt the pair walk back to en garde. On the tuning bouts, walking rises from 0.30 before a halt to 0.55 after (bout 4) and from 0.11 to 0.78 (bout 6), while advance, lunge, parry and retreat all fall. Scoring stillness as `1 − P(neutral)` gives 5% recall; scoring it as "the fencing classes stop" gives the table below.
+
+So the signal is the action classifier's own output — the probability mass on advance, lunge, parry and retreat, averaged over both fencers — run through a step-down matched filter: busy for 2 s, quiet for 3 s, peaks above the 85th percentile kept greedily at least 6 s apart. Five numbers, fitted on bouts 4–7 against lamp-derived halts, then frozen.
+
+| | bouts | halts | recall | by chance | precision |
+|---|---|---|---|---|---|
+| tuning (lamp truth) | 4–7 | 238 | 71% | 40% | 70% |
+| **held out (hand tables)** | 8–14 | 96 | **98%** | 39% | not measurable |
+
+The chance column is the point. Detections land every 8–20 s, so a ±4 s match window catches about 39% of halts with the detections scattered at random. Every bout beats its own baseline (p < 0.005, 1000 draws), but raw recall on its own would be badly misleading.
+
+Two things keep the held-out 98% from meaning as much as it looks like it means. The hand tables list **two-light halts only** — the contested ones, which by construction follow the longest exchanges and are the easiest halts to find. And with no exhaustive table, a detection that matches nothing may be a perfectly real single-light halt rather than a false alarm, so precision cannot be computed there at all; 70% on the tuning bouts is the only honest figure.
+
+`scripts/find_halts.py --worklist 8` writes the fix: every candidate halt in one bout, contested rows pre-filled, blanks for the single-light halts and the referee's call on each. Filling it makes held-out precision measurable, and the single-light calls are worth having anyway.
+
 ## Right of way
 
 In foil, when both lamps fire the touch is awarded on *priority*: to whoever was attacking, and if both were, to whoever went forward first. That makes contested halts the only ones where an action model can contribute at all — a single lamp already names the scorer, and 54% of touches in this corpus are single-lamp.
@@ -373,6 +393,7 @@ fencing/
   scripts/     demo_video.py (inference loop), train_shipping.py,
                evaluate_labels.py, sweep_parry_promote.py,
                read_scoreboard.py (lamps, halts, score digits),
+               find_halts.py (halts from motion alone, no scoreboard),
                check_touches.py (touch-table validator),
                label_worklist.py (contested-halt worklist),
                exp_touch_probe.py / exp_contested.py / exp_priority.py
