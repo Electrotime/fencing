@@ -18,7 +18,9 @@ LAB = PROJECT / "data" / "labels"
 # Lamp-derived bouts read priority off the scoreboard; contested bouts have it
 # by hand. Bouts 4 and 7 are excluded: the feature was chosen on them.
 LAMP = ("5", "6")
-HAND = ("8", "9", "10", "11", "12", "13", "14")
+# bout 13 is the SAME BOUT as bout 9 (all 14 halts align, calls identical); it is
+# excluded so the same halts are not counted twice
+HAND = ("8", "9", "10", "11", "12", "14")
 
 
 def rows_for(stem):
@@ -86,7 +88,7 @@ def main() -> int:
         print(f"\n=== POOLED, {tag} ===")
         print(f"  n={m.sum()} ({int(y.sum())}L/{int((~y).sum())}R)  AUC {v:.2f}  "
               f"one-sided p {one:.4f}  95% CI [{lo:.2f}, {hi:.2f}]")
-        print(f"  x2 for the two registered features: p {min(1.0, one * 2):.4f}")
+        print(f"  x3 for the three registered features: p {min(1.0, one * 3):.4f}")
         print(f"  VERDICT: {'CONFIRMED' if one < 0.05 else 'not confirmed'}")
 
     print("\n--- leave-one-bout-out, all priority ---")
