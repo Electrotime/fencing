@@ -48,6 +48,20 @@ def load(stem):
             "halts": [(u, p) for u, p, _ in rows], "calls": calls}
 
 
+def load_calls(stem):
+    """Same shape as load(), from the hand-labelled table -- for bouts with no lamp box."""
+    rows = [(u, p, k) for u, p, k in EP.rows_for(stem) if p]
+    calls = {}
+    if rows:
+        pr = np.load(LAB / PR.CACHE[stem])
+        X, names, ok = PR.build([(stem, u, p) for u, p, _ in rows], [pr] * len(rows), 0.3)
+        x = X[names.index(PR.PREREG)]
+        z = (x - x.mean()) / (x.std() or 1.0)
+        for (u, p, _), zz in zip([r for r, k in zip(rows, ok) if k], z):
+            calls[round(u, 2)] = ("left" if zz > 0 else "right", p)
+    return {"t": None, "state": None, "halts": [(u, p) for u, p, _ in rows], "calls": calls}
+
+
 def draw(frame, data, now_s):
     """Panel at top-centre, clear of the broadcast's own scoreboard along the bottom."""
     H, W = frame.shape[:2]
@@ -57,21 +71,22 @@ def draw(frame, data, now_s):
     frame[0:y1, x0:x1] = cv2.addWeighted(box, 0.88, frame[0:y1, x0:x1], 0.12, 0)
     cv2.rectangle(frame, (x0, 0), (x1 - 1, y1), (90, 90, 90), 2)
 
-    i = int(np.searchsorted(data["t"], now_s))
-    i = min(max(i, 0), len(data["t"]) - 1)
-    for s, cx in (("left", x0 + int((x1 - x0) * 0.16)),
-                  ("right", x0 + int((x1 - x0) * 0.84))):
-        v = int(data["state"][s][i])
-        col = OFF if v == 0 else (WHITE if v == 1 else
-                                  ((60, 60, 235) if s == "left" else (60, 210, 60)))
-        cv2.circle(frame, (cx, 52), 27, col, -1)
-        cv2.circle(frame, (cx, 52), 27, (200, 200, 200), 2)
-        cv2.putText(frame, s.upper(), (cx - 30, 96), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55, (205, 205, 205), 1, cv2.LINE_AA)
+    if data["state"] is not None:
+        i = int(np.searchsorted(data["t"], now_s))
+        i = min(max(i, 0), len(data["t"]) - 1)
+        for s, cx in (("left", x0 + int((x1 - x0) * 0.16)),
+                      ("right", x0 + int((x1 - x0) * 0.84))):
+            v = int(data["state"][s][i])
+            col = OFF if v == 0 else (WHITE if v == 1 else
+                                      ((60, 60, 235) if s == "left" else (60, 210, 60)))
+            cv2.circle(frame, (cx, 52), 27, col, -1)
+            cv2.circle(frame, (cx, 52), 27, (200, 200, 200), 2)
+            cv2.putText(frame, s.upper(), (cx - 30, 96), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55, (205, 205, 205), 1, cv2.LINE_AA)
 
     live = [(u, p) for u, p in data["halts"] if u + HOLD[0] <= now_s <= u + HOLD[1]]
     if not live:
-        cv2.putText(frame, "scoreboard reader", (x0 + 20, y1 - 14),
+        cv2.putText(frame, "right of way", (x0 + 20, y1 - 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (140, 140, 140), 1, cv2.LINE_AA)
         return frame
     u, ref = live[0]

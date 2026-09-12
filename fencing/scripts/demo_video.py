@@ -451,10 +451,11 @@ def main() -> None:
             if a != "--frame-model" and not a.startswith("--") and a not in _skip]
     use_frame = "--frame-model" in sys.argv
     want_board = "--scoreboard" in sys.argv
+    want_calls = "--calls" in sys.argv
     want_trail = "--trail" in sys.argv
     if not argv:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
-                 "[--start S] [--end S] [--scoreboard] [--trail] [--frame-model | --self-test]")
+                 "[--start S] [--end S] [--scoreboard|--calls] [--trail] [--frame-model | --self-test]")
     video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")
@@ -483,9 +484,9 @@ def main() -> None:
             cls=lambda: ActionLSTM(pool=POOL_MODE,
                                    n_agg=N_AGG_WIDE if USE_OPPONENT else 6))
     board = None
-    if want_board:
+    if want_board or want_calls:
         import scoreboard_overlay as SB
-        board = SB.load(video.stem)
+        board = SB.load(video.stem) if want_board else SB.load_calls(video.stem)
         print(f"scoreboard: {len(board['halts'])} halts on bout {video.stem}")
     blade_model = load_blade_model(BLADE_WEIGHTS) if BLADE_WEIGHTS.exists() else None
     if blade_model is None:
