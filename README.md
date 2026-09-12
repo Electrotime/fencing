@@ -11,13 +11,7 @@ On the halts where both scoring lamps fire and the referee must award the touch 
 
 **[electrotime.github.io/fencing](https://electrotime.github.io/fencing/)** — annotated clips, the full results, and where the method breaks, on one page.
 
-To run it on your own footage, the shortest path is one command after [installing](#installation):
-
-```bash
-python scripts/demo_video.py your_video.mp4 out.mp4 --start 0 --end 20 --trail
-```
-
-That writes an annotated copy with pose skeletons, per-fencer action labels and blade-tip trails. [Demo video](#demo-video) explains what is on screen and which checkpoint renders it.
+To run it on your own footage, see [Installation](#installation) and [Usage](#usage). [Demo video](#demo-video) explains what is on screen and which checkpoint renders it.
 
 ## Features
 
