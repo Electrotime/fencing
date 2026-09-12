@@ -1,4 +1,4 @@
-"""Parry-targeted training interventions, screened on the parry-dense bouts. See CLAUDE.md."""
+"""Parry-targeted training interventions, screened on the parry-dense bouts. See README.md, 'Parry detection'."""
 import argparse
 import sys
 from pathlib import Path

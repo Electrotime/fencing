@@ -28,7 +28,7 @@ from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _normalize_sequence)
 from src.utils import draw_action_label, draw_blade_tip, draw_blade_trail, draw_skeleton
 
-# seven bouts, four venues, mirror-augmented; see CLAUDE.md.
+# seven bouts, four venues, mirror-augmented; see README.md, "Results".
 MODEL_PATH = PROJECT_ROOT / "models" / "action_mirror7.pth"
 POOL_MODE = "last"
 USE_OPPONENT = True
@@ -247,7 +247,7 @@ def _apply_parry_gate(tracks: dict[str, FencerTrack]) -> None:
         fw_conf = float(track.probs[fw_i] / rest) if rest > 1e-6 else 0.0
 
         if PARRY_DECODER:
-            # one line replaces the veto/promote pair; see CLAUDE.md for the control
+            # one line replaces the veto/promote pair; README.md "Parry detection" has the control
             fires = (PARRY_W_OWN * float(track.probs[parry_i])
                      + PARRY_W_OPP * opp_attack) >= PARRY_LINE_MIN
             if fires:

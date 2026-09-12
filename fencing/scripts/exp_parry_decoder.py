@@ -1,4 +1,4 @@
-"""Learned decision rule over both fencers' probability vectors vs the hand gate. See CLAUDE.md."""
+"""Learned decision rule over both fencers' probability vectors vs the hand gate. See README.md, 'Parry detection'."""
 import argparse
 import sys
 from pathlib import Path

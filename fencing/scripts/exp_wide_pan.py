@@ -1,4 +1,4 @@
-"""Wide pan strips (0.44) vs shipped (0.22), leave-one-bout-out. See CLAUDE.md."""
+"""Wide pan strips (0.44) vs shipped (0.22), leave-one-bout-out. See README.md, 'Cross-venue behaviour'."""
 import argparse
 import sys
 from pathlib import Path

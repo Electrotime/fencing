@@ -1,4 +1,4 @@
-"""Elbow-opening RATE as a 7th feature, with a shuffled control. See CLAUDE.md."""
+"""Elbow-opening RATE as a 7th feature, with a shuffled control."""
 import argparse
 import sys
 from pathlib import Path

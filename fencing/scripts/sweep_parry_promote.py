@@ -1,4 +1,4 @@
-"""Can opponent context RAISE parry recall? Protocol in CLAUDE.md."""
+"""Can opponent context RAISE parry recall? Protocol in README.md, 'Parry detection'."""
 import argparse
 import sys
 from pathlib import Path

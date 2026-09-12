@@ -245,7 +245,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
   <p class="eyebrow">Halt detection</p>
   <h2>Finding halts with the graphics switched off</h2>
   <p class="col">Locating the lamp box is the one thing that has to be redone for every new broadcast. A second detector removes it by ignoring the overlay entirely and watching the fencers, because a halt has a shape: <strong>fencing, then walking</strong>.</p>
-  <p class="col">That second word is the whole trick, and it is not what I first tried. Quiet does not mean <em>still</em> &mdash; after a halt the pair walk back to en garde. Scoring stillness as &ldquo;not neutral&rdquo; finds 5% of halts. Scoring it as &ldquo;the fencing classes stop&rdquo; finds the table below. The signal is the action classifier's own output: probability mass on advance, lunge, parry and retreat, run through a matched filter that wants 2&nbsp;s of fencing followed by 3&nbsp;s of walking. Five numbers, fitted on four bouts, then frozen.</p>
+  <p class="col">That second word is the whole trick, and it is not what I first tried. Quiet does not mean <em>still</em> &mdash; after a halt the pair walk back to en garde. Scoring stillness as &ldquo;not neutral&rdquo; finds 5% of halts; scoring it as &ldquo;the fencing classes stop&rdquo; finds the table below. The detector runs on the action classifier's own output, with its five parameters fitted on four bouts and then frozen.</p>
   <table>
     <thead><tr><th>Bouts</th><th>Halts</th><th>Found</th><th>By chance</th><th>Precision</th></tr></thead>
     <tbody>
