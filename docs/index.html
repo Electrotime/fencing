@@ -143,11 +143,12 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
   <h1>Fence<br>Vision</h1>
   <p class="lede" style="margin-top:26px">Six-class action recognition for foil fencing, from ordinary broadcast video. No sensors, no instrumented equipment, no marked piste.</p>
   <p class="col">Two fencers are located and tracked, 33 pose landmarks are extracted from each, and an LSTM classifies what both are doing twenty times a second. A second pipeline reads the broadcast scoreboard to recover when touches landed and who scored, with no OCR.</p>
+  <p class="col" style="color:var(--muted);font-size:15px">Built on 7 bouts across 4 venues: 51 minutes of hand-labelled footage, 1,365 labelled intervals, plus touch outcomes across 14 video files. Code, labelling and analysis are my own &mdash; I fence foil, which is where the action and phrase-type labels come from.</p>
   <div class="stats">
     <div class="stat"><div class="n">80.2%</div><div class="k">best held-out bout</div></div>
     <div class="stat"><div class="n">73.6%</div><div class="k">mean, 5 held out</div></div>
     <div class="stat"><div class="n">6</div><div class="k">action classes</div></div>
-    <div class="stat"><div class="n">104<span style="font-size:26px">/104</span></div><div class="k">touches read</div></div>
+    <div class="stat"><div class="n">104<span style="font-size:26px">/104</span></div><div class="k">touches read, bouts 4&ndash;7</div></div>
   </div>
 </header>
 
@@ -282,8 +283,8 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
   <table>
     <thead><tr><th>Task</th><th>Result</th><th>Across</th></tr></thead>
     <tbody>
-      <tr><td>Scoring touches located</td><td class="n">104 / 104</td><td>4 broadcasters</td></tr>
-      <tr><td>Lamp colour identified</td><td class="n">104 / 104</td><td>4 broadcasters</td></tr>
+      <tr><td>Scoring touches located</td><td class="n">104 / 104</td><td>bouts 4&ndash;7, 4 broadcasters</td></tr>
+      <tr><td>Lamp colour identified</td><td class="n">104 / 104</td><td>bouts 4&ndash;7, 4 broadcasters</td></tr>
       <tr><td>Single-lamp calls made</td><td class="n">56 / 56</td><td>no model needed</td></tr>
     </tbody>
   </table>
@@ -359,7 +360,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
   </div>
 
   <div class="note col">
-    <p><strong>What the pooled number does and does not support.</strong> Across all 104 contested halts the model ranks the referee's call at <span class="mono">0.61 AUC</span> (95% CI <span class="mono">[0.50, 0.72]</span>, <span class="mono">p = 0.026</span>). That clears significance alone but not after correcting for the three pre-registered features, and the attack-in-prep figure rests on seven halts. The category breakdown is the result worth quoting; the single average is not.</p>
+    <p><strong>What the pooled number does and does not support.</strong> Across all 104 contested halts &mdash; a different set from the 104 touches above, drawn from eight held-out bouts &mdash; the model ranks the referee's call at <span class="mono">0.61 AUC</span> (95% CI <span class="mono">[0.50, 0.72]</span>, <span class="mono">p = 0.026</span>). That clears significance alone but not after correcting for the three pre-registered features, and the attack-in-prep figure rests on seven halts. The category breakdown is the result worth quoting; the single average is not.</p>
   </div>
 </section>
 
@@ -390,7 +391,8 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
 </section>
 
 <footer>
-  <p>Foil fencing action recognition from broadcast video: pose estimation, scoreboard reading, and a pre-registered test of right-of-way prediction.</p>
+  <p><strong>FenceVision</strong> by Aaron Li. Foil fencing action recognition from broadcast video: pose estimation, scoreboard reading, and a pre-registered test of right-of-way prediction.</p>
+  <p>Source, full results, and the experiments that failed: <a href="https://github.com/Electrotime/fencing">github.com/Electrotime/fencing</a>.</p>
   <p style="margin:0">Visualization inspired by <a href="https://rhizomatiks.com/en/work/fencing-tracking-and-visualization-system/" target="_blank" rel="noopener"><em>Fencing Tracking and Visualization System</em></a> (Rhizomatiks &times; Dentsu Lab Tokyo), presented at <a href="https://dl.acm.org/doi/abs/10.1145/3478511.3491310" target="_blank" rel="noopener">SIGGRAPH Asia 2021</a>. Implementation is my own.</p>
 </footer>
 </div>
