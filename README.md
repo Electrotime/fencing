@@ -3,7 +3,7 @@
 
 Action recognition for fencing from ordinary broadcast video. FenceVision detects both fencers in a frame and classifies what each one is doing at 20 predictions per second, using only the video feed. No sensors, no instrumented equipment, no marked piste.
 
-Held-out accuracy is 80.2% on a bout the model never trained on, and 66-70% at venues it has never seen, compared to 16.7% for random guessing.
+Held-out accuracy is 80.2% on a bout the model never trained on, against a 34.8% majority-class baseline. Holding out a single unfamiliar venue gives 69-74%; holding out two venues at once, the harder test, gives 66-70%.
 
 On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.61 AUC** (95% CI [0.50, 0.72], p = 0.026) across 104 halts in eight bouts never used to select it. That clears 0.05 on its own but **not** after correcting for the three registered features (p = 0.077), so it is suggestive rather than established. That average hides the useful part. Split by what kind of action the halt was — labelled by a fencer from video, before seeing any model output — it is **0.84 where one fencer clearly attacks and the other retreats**, and at or below chance on every other kind. The method has a boundary, and it falls where right of way stops being decided by who went forward. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
 
@@ -18,7 +18,7 @@ To run it on your own footage, see [Installation](#installation) and [Usage](#us
 - Six-class action recognition: `advance`, `retreat`, `walking`, `neutral`, `lunge`, `parry`
 - Simultaneous footwork and blade output, so a parry during a retreat is reported as both
 - Opponent-aware classification: each fencer's features include their opponent's
-- A learned two-term decision rule for parry, worth +13 points of recall at unchanged overall accuracy
+- A learned two-term decision rule for parry, worth +11 points of recall on held-out bout 4 at unchanged overall accuracy
 - Mirror augmentation for left- and right-handed fencers, worth 7 points against a matched control
 - Annotated video output with per-fencer overlays, blade-tip trails and a scoreboard panel
 - Leave-one-bout-out evaluation scripts and per-feature ablation controls
@@ -73,13 +73,13 @@ Detection runs in two stages. YOLOv8n locates the two fencers and returns a boun
 
 Each fencer's normalised skeleton feeds two paths. A rolling 60-frame sequence (2 seconds of motion) goes into a 128-unit LSTM, and six engineered features are computed alongside it: net forward movement, stance width, wrist speed, total travel, arm reach, and knee angle. The LSTM output and the feature vector are concatenated at the classifier head, which produces probabilities over the six classes. A rule-based gate then adjusts parry predictions using the opponent's state.
 
-Three choices account for most of the accuracy. First, the LSTM output is reduced with `last` rather than `mean`, worth 4 to 5 points: a parry lasts about 0.6 s inside a 2 s window, so averaging buries it under the rest of the window. Second, each fencer's feature vector is concatenated with their opponent's, as `[own(6) | opponent(6) | present(1)]`, because a retreat means something different when the other fencer is lunging. Third, normalising the skeletons keeps the posture features camera-invariant, which is why they generalise across venues while raw motion features do not (see [Cross-venue behaviour](#cross-venue-behaviour)).
+Three choices account for most of the accuracy, and note that none of them is the LSTM itself — under matched conditions a boosted tree beats it (see [Does the sequence model earn its keep?](#does-the-sequence-model-earn-its-keep)). First, the LSTM output is reduced with `last` rather than `mean`, worth 4 to 5 points: a parry lasts about 0.6 s inside a 2 s window, so averaging buries it under the rest of the window. Second, each fencer's feature vector is concatenated with their opponent's, as `[own(6) | opponent(6) | present(1)]`, because a retreat means something different when the other fencer is lunging. Third, normalising the skeletons keeps the posture features camera-invariant, which is why they generalise across venues while raw motion features do not (see [Cross-venue behaviour](#cross-venue-behaviour)).
 
 A fourth, added later, is mirror augmentation. Normalisation already removes translation and scale, so cropping or zooming the video produces near-identical tensors, but it does not remove handedness: which arm extends toward the opponent survives every normalisation step. The training corpus happened to contain only one handedness in its right-hand slot, and a left-handed fencer at a new venue scored 35% while their opponent scored 71%. Mirroring the pose sequences fixed that specific gap and helped generally, because the six engineered features are provably mirror-invariant, so only the sequence the LSTM reads is flipped.
 
 ## Parry detection
 
-Parry is the hardest class: brief, small, and physically overlapping with footwork. The raw classifier ran at 29% precision, which makes an on-screen indicator worse than useless.
+Parry is the hardest class: brief, small, and physically overlapping with footwork. Before mirror augmentation the raw classifier ran at 29% precision on held-out bout 4, which makes an on-screen indicator worse than useless; the table below is the current model, at 39%.
 
 Across bouts 3 to 5, 86% of labelled parries have the opponent attacking at the same moment (76% lunging, 10% advancing with an extension). That asymmetry is what makes the opponent's state usable: a parry is a response and barely happens unattacked, while a lunge only draws one about half the time. So the rule runs one way — the opponent's attack conditions parry, never the reverse.
 
@@ -234,8 +234,8 @@ A pre-registered test asks whether the model's action probabilities carry that d
 | bouts | role | n | AUC | one-sided p |
 |---|---|---|---|---|
 | 4, 7 | discovery | 19 | 0.83 | — |
-| 5, 6 | confirmation | 13 | 0.75 | 0.084 |
-| 8, 9 | confirmation | 14 | 0.71 | 0.105 |
+| 5, 6 | confirmation | 17 | 0.75 | 0.084 |
+| 8, 9 | confirmation | 21 | 0.71 | 0.105 |
 | 10 | confirmation | 10 | 0.64 | 0.276 |
 | 11 | confirmation | 11 | 0.77 | — |
 | 12 | confirmation | 5 | 0.75 | — |
@@ -244,9 +244,9 @@ A pre-registered test asks whether the model's action probabilities carry that d
 
 95% CI [0.50, 0.72] — the lower bound sits **on** chance, so the interval no longer excludes it. The pooled row is the result: the hypothesis was tested repeatedly on held-out data and most single attempts do not clear 0.05 alone, which is what an effect of this size looks like when each attempt carries a dozen halts. Quoting a single attempt, in either direction, would be selection. It does **not** survive correction for the three registered features (p 0.077), and holds under leave-one-bout-out on every bout.
 
-The per-bout figures for bouts 13 and 14 are withheld while a phrase-type labelling pass on them is still open, because seeing them could bias those labels. They are in the pooled row.
+Bout 14's per-bout figure is withheld while a phrase-type labelling pass on it is still open, because seeing it could bias those labels; its 40 halts are in the pooled row. Bout 13 has no row because it is bout 9 again and is excluded entirely. The n column counts halts the model could score, so it runs below the halts carrying a priority call — 110 across these bouts, 104 with usable pose coverage.
 
-**The estimate has fallen every time data was added or an error was fixed: 0.83 on discovery, then 0.72, 0.70, 0.69, 0.64, 0.61.** That is what an inflated discovery estimate looks like as it regresses, and 0.64 is the most trustworthy figure here because it rests on the most data. The last of those was not new data but a duplicate: files 9 and 13 are the same match, and that bout is the strongest in the corpus at 0.88, so counting it twice inflated the pool through both extra sample size and a favourable contribution.
+**The estimate has fallen every time data was added or an error was fixed: 0.83 on discovery, then 0.72, 0.70, 0.69, 0.64, 0.61.** That is what an inflated discovery estimate looks like as it regresses, and 0.61 is the most trustworthy figure here because it rests on the most data. The last of those was not new data but a duplicate: files 9 and 13 are the same match, and that bout is the strongest in the corpus at 0.88, so counting it twice inflated the pool through both extra sample size and a favourable contribution.
 
 Where that leaves it: an effect that is probably real, around 0.6, on a sample still too small to establish it against family-wise correction. More bouts would settle it either way.
 
@@ -303,7 +303,7 @@ So the working feature is order-blind by necessity, not by choice. "Who advanced
 Three things it is not:
 
 1. **Not a decision rule.** A threshold fitted on the discovery bouts scores 82% there and **50%** on confirmation — worse than always picking the more common side. Per-bout offsets range from -0.204 to +0.029, so the ranking transfers and the boundary does not. Z-scoring within a bout, which needs no labels, gives 69% against a 56% baseline — on 48 halts, a margin of six calls.
-2. **Not order.** The rule turns on who moved *first*, so a second feature was registered *before the confirmation data existed*: the time-centroid of each fencer's advance probability. It scored **0.38**, below chance. The model sees who is attacking, not who started; a 2-second window smears an onset the referee resolves in tenths of a second.
+2. **Not order.** The rule turns on who moved *first*, so a second feature was registered *before the confirmation data existed*: the time-centroid of each fencer's advance probability. It scored **0.38**, below chance, and twice more since. The model sees who is attacking, not who started — and, as the section above establishes, that blur is intrinsic to pose motion rather than to the window length.
 3. **Not deployable.** The priority label is *derived from* the scoreboard, and the contested subset is *defined by* the lamps. This measures that pose carries information about right of way. It does not replace reading the scoreboard, and a rule that needs the lamps to know which halts to apply to cannot be used where the lamps are missing.
 
 ## Bout statistics
@@ -375,18 +375,18 @@ Roughly 35 seconds of labelled footage from a new venue is worth 9 points, and t
 
 The detector gives a box, and a blade is a thin bright object inside it, so its axis comes from a PCA fit on the box's edge pixels and the tip is the far end from the hand. That fit fails on the 640x640 training exports, where the blade is about a pixel wide, and works on the 1080p frames inference actually sees — the trail falls back to a box corner when the fit is not line-like. Trails are red on the left and green on the right, matching the lamps.
 
-- **The segment is chosen by halt density, not accuracy.** It is the tightest cluster of contested halts in the bout, and it is also the model's worst stretch: two of four. Over the full bout it is seven of eleven.
+- **The segment is chosen by halt density, not accuracy.** It is the tightest cluster of contested halts in the bout: two of them, at 07:22 and 07:47, and the model calls both correctly. Over the full bout it gets seven of eleven, so this stretch flatters it.
 - **The action model is `verify_m7_h6.pth`, trained with this bout held out.** The shipped checkpoint trains on all seven bouts and would have looked identical while being in-sample.
 
 Visualization inspired by [Fencing Visualized](https://rhizomatiks.com/en/work/fencing-tracking-and-visualization-system/) (Rhizomatiks x Dentsu Lab Tokyo, [SIGGRAPH Asia 2021](https://dl.acm.org/doi/abs/10.1145/3478511.3491310)). Implementation is my own.
 
 ## Known limitations
 
-1. **Parry recall is 26 to 52% depending on the bout.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one. Broadcast and standard videos are limited by a low FPS and high shutter speed, causing blurring or disappearing blades, which cannot be accurately used to detect a parry. 
-2. **Cross-venue costs 6 to 10 points, and the price varies by venue.** Two venues have now been held out from the same training set and scored independently: 66.4% and 70.2%, against 75.5-80.2% on a familiar bout. Roughly a minute of labelled footage from the target venue closes most of the gap. Adding a third venue to training does not improve transfer to a fourth, so venue diversity in training is not the lever.
+1. **Parry recall is 26 to 52% depending on the bout.** Precision is acceptable now, but most real parries are still missed, and neither more labels, a separate blade head, nor a dedicated binary parry head has moved it. The remaining ideas all need a better view of the blade rather than better use of the current one. Broadcast and standard video is limited by low frame rates and slow shutter speeds, which blur or erase the blade entirely across the frames a parry occupies. 
+2. **Cross-venue costs 6 to 10 points, and the price varies by venue.** Two venues have now been held out from the same training set and scored independently: 66.4% and 70.2%, against 75.5-80.2% on a familiar bout. 35 seconds of labelled footage from the target venue is worth 9 points and the curve is flat past about three minutes, so the gap closes cheaply. Adding a third venue does not improve transfer to a *fourth* unseen one — venue diversity is not the lever for zero-shot transfer — but the existing corpus is still what makes those 35 seconds work, and adding bout 7 to training is worth +2.5 points on bouts scored individually. Other venues are a prior, not a substitute.
 3. **Motion features degrade off-venue.** The fix is a better pan estimate or a camera-invariant reformulation, not more data.
 4. **Broadcast filler is not filtered.** 28% of predictions over replays and crowd shots display a real action. Geometry-based gating caps at 36% precision, because a replay of a touch is geometrically identical to the touch.
-5. **One fencer's rear arm is invisible to the camera.** Where the sword arm is hidden behind the torso, accuracy falls from 81.5% to 47.8% for the same fencer. This is a limit of the camera position rather than of the model, and suppressing predictions when the arm is hidden was tested and does not generalise across bouts.
+5. **One fencer's sword arm is hidden by their own torso.** Where the sword arm is occluded that way, accuracy falls from 81.5% to 47.8% for the same fencer. This is a limit of the camera position rather than of the model, and suppressing predictions when the arm is hidden was tested and does not generalise across bouts.
 6. **Off-target lamp detection does not transfer between broadcasts.** One production gives the white lamp its own indicator and it reads at 8/10; another has none and brightens globally at every halt, where four separate statistics failed. Locating any lamp needs either labels to contrast against or a human to look — two attempts at unsupervised localisation both found LED floods and permanent graphics instead.
 7. **The right-of-way result is a measurement, not a capability.** Its label is derived from the scoreboard and its subset is defined by the lamps, so it cannot be applied where the lamps are unreadable. No transferable decision threshold exists: the ranking generalises, the boundary does not.
 
