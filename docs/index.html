@@ -304,8 +304,8 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
     </tbody>
   </table>
   <div class="note">
-    <p><strong>The chance column is the point.</strong> Detections land every 8&ndash;20 seconds, so a &plusmn;4&nbsp;s match window catches about 39% of halts even with the detections scattered at random. Every bout beats its own baseline (p &lt; 0.005), but recall quoted alone would be badly misleading.</p>
-    <p><strong>And 98% means less than it looks like.</strong> The held-out ground truth lists two-light halts only &mdash; the contested ones, which follow the longest exchanges and are the easiest to find. With no exhaustive halt table, a detection matching nothing may be a real single-light halt rather than a false alarm, so precision cannot be computed there at all. 70% on the tuning bouts is the only honest figure, and the next labelling pass is built to fix that.</p>
+    <p><strong>The chance column is the point.</strong> Detections land every 8&ndash;20 seconds, so a &plusmn;4&nbsp;s match window catches about 39% of halts even with the detections scattered at random. Every bout beats its own baseline (p &lt; 0.005). Recall needs the chance column beside it.</p>
+    <p><strong>What the held-out 98% covers.</strong> The ground truth there lists two-light halts only &mdash; the contested ones, which follow the longest exchanges and are the easiest to find. Precision is 70% on the tuning bouts; the held-out set has no exhaustive table to measure it against, since a detection matching nothing may be a real single-light halt rather than a false alarm. The next labelling pass builds one.</p>
   </div>
 </section>
 
@@ -360,13 +360,13 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
   </div>
 
   <div class="note col">
-    <p><strong>What the pooled number does and does not support.</strong> Across all 104 contested halts &mdash; a different set from the 104 touches above, drawn from eight held-out bouts &mdash; the model ranks the referee's call at <span class="mono">0.61 AUC</span> (95% CI <span class="mono">[0.50, 0.72]</span>, <span class="mono">p = 0.026</span>). That clears significance alone but not after correcting for the three pre-registered features, and the attack-in-prep figure rests on seven halts. The category breakdown is the result worth quoting; the single average is not.</p>
+    <p><strong>What the pooled number supports.</strong> Across all 104 contested halts &mdash; a different set from the 104 touches above, drawn from eight held-out bouts &mdash; the model ranks the referee's call at <span class="mono">0.61 AUC</span> (95% CI <span class="mono">[0.50, 0.72]</span>, <span class="mono">p = 0.026</span>). It does not hold after correcting for the three pre-registered features, so the categories above are the result to quote rather than the average. The correction analysis, the leave-one-bout-out checks and the per-bout figures are in the <a href="https://github.com/Electrotime/fencing#right-of-way">README</a>.</p>
   </div>
 </section>
 
 <section>
   <p class="eyebrow">Method</p>
-  <h2>Built to be wrong in public</h2>
+  <h2>How it was tested</h2>
   <div class="grid2">
     <div>
       <h3>Pre-registered, then tested</h3>
