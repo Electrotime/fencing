@@ -124,9 +124,7 @@ landmarkers = {s: _make_landmarker(mp.tasks.vision.RunningMode.VIDEO).__enter__(
 prev_gray, pan_windows = None, {}
 preds = []          # (slot, time, raw_label, shown_label)
 prob_rows = []      # (slot, time, prob_vector) -- cached for offline experiments
-# The window is 60 FRAMES, so on 60 fps footage it spans 1 s where 30 fps footage
-# gives 2 s, and the engineered features integrate over half the time. Decimating to
-# a common rate makes 60 samples mean the same duration everywhere.
+# The window is 60 FRAMES, so decimating to a common rate keeps its DURATION equal.
 TARGET_FPS = 30.0
 STRIDE = max(1, int(round(fps / TARGET_FPS))) if FPS_NORM else 1
 if STRIDE > 1:

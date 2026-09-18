@@ -25,13 +25,7 @@ FRAC = 0.55        # keep pixels this fraction of the way to the peak
 
 
 def has_table(stem):
-    """A usable contested table -- existence is not enough.
-
-    Bout 13 is excluded from find_halts.HAND_BOUTS as bout 9's duplicate but has
-    its own table, so the bout list is the wrong thing to ask. Bout 6's table is
-    an older three-column schema read_contested returns nothing for, so the file
-    existing is the wrong thing to ask too. Ask the parser.
-    """
+    """A usable contested table -- ask the parser, not the file or the bout list."""
     if not (LAB / f"bout{stem}_contested.tsv").exists():
         return False
     import exp_contested as C
@@ -129,11 +123,8 @@ def blob(g, x, y, frac=FRAC):
     return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
 
 
-# Every broadcast whose boxes are known puts the two lamps at the SAME height,
-# red left of green, and the two indicators are one design mirrored -- so their
-# boxes come out near-identical in size. Scoring the PAIR on alignment and
-# symmetry beats taking each colour's global peak, which lands on whatever else
-# flashes at a halt: on bouts 4 and 7 that was a graphic, not the lamp.
+# Lamps sit at the same height, red left of green, one design mirrored. Scoring
+# the PAIR on that beats taking each colour's global peak.
 DY = 45      # px the two lamp centres may differ vertically
 DX = 40      # px they must differ horizontally
 SYM = 2.5    # the larger box may exceed the smaller by at most this, per axis
@@ -185,11 +176,8 @@ def two_light_times(stem):
 
 
 def verify(stem, boxes, halts, tol=2.5, video=None):
-    """Recall is not enough -- anything that flashes at a halt recovers halts.
-
-    A real lamp box also separates the sides, so halts known to have lit BOTH
-    lamps have to come back two-colour. Bout 7's first boxes scored 77% recall
-    while agreeing with the true box on the lights just 52% of the time.
+    """Recall is not enough: a real box also separates the sides, so known
+    two-light halts have to come back two-colour.
     """
     t, ser = RS.lamp_series(str(video or RAW / f"{stem}.mp4"), boxes, 0.1,
                             LAB / f"{stem}_lampfound.npz")

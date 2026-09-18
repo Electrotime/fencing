@@ -13,10 +13,8 @@ from src.action_model import CLASS_NAMES
 
 LAB = PROJECT / "data" / "labels"
 
-# Frozen at the F1 peak of a 180-point sweep over bouts 4-7 (lamp ground truth),
-# then applied unchanged to 8-14. The surface is flat -- everything in the top
-# dozen scores 0.70-0.71 -- so the exact pick carries little weight.
-# Do not re-fit these on a bout you then report a number for.
+# Frozen on bouts 4-7, then applied unchanged to 8-14. Do not re-fit these
+# on a bout you then report a number for.
 DT = 0.2        # s, resampling grid
 BEFORE = 2.0    # s of fencing that has to precede a halt
 AFTER = 3.0     # s of walking-back that has to follow it
@@ -29,11 +27,7 @@ HAND_BOUTS = ("8", "9", "10", "11", "12", "14")  # 13 is the same bout as 9
 
 
 def activity(stem, dt=DT):
-    """Both fencers' fencing-class probability mass on a uniform time grid.
-
-    Walking is excluded, not just neutral: after a halt the pair walk back to en
-    garde, so walking is part of the quiet side of the step, not the busy side.
-    """
+    """Fencing-class mass, both fencers, on a grid. Walking counts as quiet."""
     d = np.load(LAB / f"{stem}_probs_mirror.npz", allow_pickle=True)
     t, p, slot = np.asarray(d["time"]), np.asarray(d["probs"]), np.asarray(d["slot"])
     fence = [CLASS_NAMES.index(c) for c in ("advance", "lunge", "parry", "retreat")]
@@ -79,11 +73,7 @@ def find(grid, a, before=BEFORE, after=AFTER, pct=PCT, gap=GAP):
 
 
 def chance(grid, pred, true, real, n=1000, seed=0, gap=GAP, tol=TOL):
-    """Recall of the same number of detections scattered at random.
-
-    Detections are dense enough that a +/-4 s match window catches a fair share of
-    halts by luck, so raw recall means little without this.
-    """
+    """Recall of the same number of detections scattered at random."""
     rng = np.random.default_rng(seed)
     out = []
     for _ in range(n):

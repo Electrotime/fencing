@@ -54,11 +54,7 @@ def get_blade_centre(frame: np.ndarray, model: YOLO) -> tuple[float, float] | No
 
 
 def blade_tip_from_box(box, wrists) -> tuple[float, float] | None:
-    """Tip estimate: the box corner farthest from the nearest wrist holding the blade.
-
-    A blade lies along one diagonal of its box, so its two ends are opposite corners;
-    the far one from the hand is the point.
-    """
+    """Tip estimate: the box corner farthest from the wrist holding the blade."""
     if box is None or not wrists:
         return None
     x1, y1, x2, y2 = box

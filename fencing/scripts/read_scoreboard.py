@@ -12,10 +12,7 @@ sys.path.insert(0, str(PROJECT / "scripts"))
 RAW = PROJECT / "data" / "raw_video"
 LAB = PROJECT / "data" / "labels"
 
-# `anchor` is the timer panel: on screen exactly when the scorebug is, and it never
-# glows, so it settles whether the overlay is up. Without it the sponsor bar that
-# slides through the same band reads as a score change. `wide` is the score pill,
-# `digits` its interior in wide-relative coordinates -- the only part a touch moves.
+# Per-broadcast box geometry. See DEV_NOTES for what each key is for.
 LAYOUT = {
     "7": dict(anchor=(600, 566, 696, 618),
               wide=dict(left=(470, 560, 562, 620), right=(726, 560, 814, 620)),
@@ -23,29 +20,20 @@ LAYOUT = {
               lamp=dict(left=(470, 560, 562, 620), right=(726, 560, 814, 620),
                         left_white=(440, 620, 545, 631),
                         right_white=(740, 620, 845, 631))),
-    # bout 4 lamp boxes were located by contrasting frames at labelled halts against
-    # the rest of the video, not by eye: red peaked at (794, 908), green at (1226, 908).
-    # bout 4 shows off-target as WHITE in the same lamp, so no separate box.
+    # located by frame contrast, not by eye; off-target is white in the same lamp
     "4": dict(lamp=dict(left=(760, 890, 830, 926), right=(1192, 890, 1262, 926))),
     # located by whole-frame contrast against the labels, same method as bout 4.
     "5": dict(lamp=dict(left=(224, 984, 760, 1008), right=(1152, 984, 1688, 1008))),
     "6": dict(lamp=dict(left=(856, 952, 920, 976), right=(1000, 952, 1064, 976))),
-    # bouts 1-3: NO WORKING LAMP BOX. Bout 1's red/green chevrons are permanent
-    # name-plate graphics, not lamps; bout 3's award banner region catches static red
-    # scorebug elements (16 of 18 detections read "left"); bout 2 uses an AR overlay
-    # projected on the piste. Do not add boxes here without validating against labels.
+    # bouts 1-3 have NO WORKING LAMP BOX -- read DEV_NOTES before adding one
 }
 
-# Lamp brightness does NOT transfer between broadcasts -- bout 7 peaks near 230 over a
-# baseline of 2, bout 4 near 100 over 15 -- so the threshold is derived per series.
-# Lamps are lit a few percent of the time, so the top of the range is the lit state.
+# Derived per series: lamp brightness does not transfer between broadcasts.
 def lamp_threshold(v, frac=0.5):
     lo, hi = np.percentile(v, [50, 99.5])
     return lo + frac * (hi - lo)
 
-# The pill border glows with the lamp colour, which is bright in grayscale and would
-# read as a score change. Digits are white and the glow is saturated, so everything
-# here runs on min(B,G,R): white survives, coloured glow does not.
+# Everything here runs on min(B,G,R): white survives, coloured glow does not.
 WHITE = 175
 
 
@@ -122,12 +110,7 @@ def lamp_thresholds(series):
 
 
 def lamps_at(t, series, t0, thr, lo=-0.3, hi=2.0):
-    """Which lamps fired at one halt: left / right / both / none.
-
-    `none` means no coloured lamp, which in foil is an off-target (white) hit. The
-    white channel is NOT used for that -- it rises at every halt in some broadcasts,
-    marking the stoppage rather than the kind of hit.
-    """
+    """Which lamps fired at one halt: left / right / both / none (none = off-target)."""
     m = (t >= t0 + lo) & (t <= t0 + hi)
     if not m.any():
         return "none", {}
@@ -143,12 +126,7 @@ def lamps_at(t, series, t0, thr, lo=-0.3, hi=2.0):
 
 
 def lamp_states(t, series, t0, thr, lo=-0.3, hi=2.0):
-    """Per-side lamp state at one halt: colour / white / off.
-
-    Foil shows an off-target hit as a WHITE lamp. Where the broadcast gives it its own
-    indicator (bout 7, a bar under the name plate) it needs its own box; where the lamp
-    just changes colour (bout 4) the same box serves both.
-    """
+    """Per-side lamp state at one halt: colour / white / off."""
     m = (t >= t0 + lo) & (t <= t0 + hi)
     if not m.any():
         return {"left": "off", "right": "off"}
@@ -180,13 +158,7 @@ LOCKOUT = 2.5
 
 
 def detect_halts(t, series, thr, merge=LOCKOUT):
-    """Halts found from lamp onsets alone -- no hand labels, no score reading.
-
-    A second lamp can follow the first by up to 1.8 s in this footage (median 0.20 s,
-    p90 1.20 s), well beyond foil's 300 ms lockout because the graphic lags. Closing
-    the window early reads a double as a single, so onsets within `merge` seconds are
-    one halt and the window stays open that long.
-    """
+    """Halts found from lamp onsets alone -- no hand labels, no score reading."""
     onsets = []
     for s in ("left", "right"):
         v = series[s]["red" if s == "left" else "green"]
@@ -211,14 +183,7 @@ def detect_halts(t, series, thr, merge=LOCKOUT):
 
 
 def priority_from(states, scorer):
-    """Which fencer held priority, from the lamps plus what was awarded.
-
-    One target unifies both contested cases. Two colours: the award names the
-    priority holder. Colour plus white: if the valid hit scored its owner had
-    priority, and if nothing scored the off-target fencer did -- which turns an
-    annulled halt from a discarded `none` into a labelled example.
-    Returns None where priority does not apply or cannot be inferred.
-    """
+    """Which fencer held priority; None where it cannot be inferred."""
     kind = lamp_kind(states)
     if kind == "two_colour":
         return scorer if scorer in ("left", "right") else None
@@ -254,13 +219,7 @@ def otsu(x, bins=256):
 
 
 def presence(arr):
-    """True where the overlay is on screen, from the panel's own static pixels.
-
-    The median frame is the overlay because it is up more than half the time, and
-    the pixels that barely move around it are the panel furniture. Distance to
-    those is bimodal but heavily skewed -- overlay-up sits near 0 while cutaways
-    spread over a wide tail -- so the split is taken in log space.
-    """
+    """True where the overlay is on screen, from the panel's own static pixels."""
     med = np.median(arr, axis=0)
     mad = np.median(np.abs(arr - med), axis=0)
     anchor = mad <= np.percentile(mad, 40)
@@ -269,12 +228,7 @@ def presence(arr):
 
 
 def digit_masks(arr, box, ok):
-    """White-pixel masks with the always-lit furniture removed.
-
-    The pill has a bright specular arc inside the crop. Left in, it is most of the
-    mask, so swapping one digit for another moves under 4% of pixels and no
-    threshold separates a real change from compression noise.
-    """
+    """White-pixel masks with the always-lit furniture removed."""
     m = arr[:, box[1]:box[3], box[0]:box[2]] > WHITE
     const = m[ok].mean(axis=0) > 0.9 if ok.any() else np.zeros(m.shape[1:], bool)
     return m & ~const
@@ -312,12 +266,7 @@ def states(masks, ok, times, persist, stride, tol):
 
 
 def decode(masks, ok, times, persist, stride, tol):
-    """Times at which this side's digit reaches a state it has never held before.
-
-    A score only ever goes up, one at a time, so a digit image the side already
-    showed cannot be its new score. Requiring novelty is what separates a touch
-    from the overlay flapping through garbage during a replay or a sponsor bar.
-    """
+    """Times at which this side's digit reaches a state it has never held before."""
     need = max(2, int(round(persist / stride)))
     idx = np.flatnonzero(ok)
     cents, lab = [], np.full(len(masks), -1)

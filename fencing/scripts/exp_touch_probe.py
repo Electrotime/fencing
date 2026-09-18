@@ -21,53 +21,21 @@ POOLS = ("max", "mean")
 # FAILED on bout 4, 2026-08-20: AUC 0.52, one-sided p 0.42. Kept as the record.
 DEAD_PREREG = "advance max (A-B) @1s"
 
-# Replacement, registered 2026-08-20 on bouts 4+7, to be tested on 5 or 6. Averaging
-# every lookback removes the choice that killed the first one -- advance led both
-# searches but peaked at 1s on bout 7 and 4s on bout 4.
+# Registered 2026-08-20 on bouts 4+7, tested on 5/6.
 PREREG = "advance max (A-B) mean-lookback"
 SELECTED_ON = ("7", "4")
 
-# Registered 2026-08-20 on bouts 4+7. Foil priority goes to whoever was attacking,
-# so two-lamp touches are the ones a pose feature could decide; single-lamp touches
-# mix counter-attacks, ripostes and lines, and showed nothing (AUC 0.57).
+# Registered 2026-08-20: two-lamp halts only.
 PREREG_LIGHTS = "both"
 
-# incompleteness, not bad rows: the surviving rows stay usable
-# Registered 2026-08-22 from Aaron's statement of the right-of-way rule, BEFORE
-# 8_probs_mirror.npz and 9_probs_mirror.npz existed -- the pose extraction for
-# bouts 8 and 9 was still running. Priority goes to whoever went forward FIRST,
-# which is a question of ORDER; every feature tried so far pools by max or mean
-# and is order-blind. One-sided: A's advance mass earlier -> A holds priority.
-# Not yet covered: the parry transfer rule (a defender's parry takes priority
-# back, unless the attacker parries simultaneously, which is a beat).
+# Registered 2026-08-22, before bouts 8/9 pose existed. One-sided.
 ONSET_PREREG = "advance onset lead (A first) @4s"
 
-# Registered 2026-08-27, BEFORE any frame-level cache existed for bouts 5,6,8,9,10.
-# Why a retry: the window model reports a 2 s window at every timestep, and its
-# advance probability decays with a 1.58 s autocorrelation time. Foil lockout is
-# 0.30 s, so the instrument is ~5x too coarse to time an onset at all. This asks
-# whether per-frame resolution rescues the SAME statistic, unchanged: time-centroid
-# of advance probability over [t-4.0, t+0.3], B minus A, one-sided, A earlier -> A
-# holds priority. Same halts, same direction. Only the probability source changes.
-# Third registered feature, so the family correction becomes x3.
-# SUPERSEDED 2026-08-27, before any run: models/action_frame.pth expects 6 agg
-# features (head 134) and the pipeline now feeds 13 (141). It predates wide_agg by
-# three weeks and nothing in the repo trains a replacement. Registered source is
-# now the CURRENT model over a 25-frame window (0.83 s) instead of 60 (2.00 s).
-# Statistic, direction, halts and subset all unchanged. Trades blur for noise: the
-# model was trained at 60 frames, so 25 is off-distribution. That is the cost of
-# the only resolution test available without retraining.
+# Registered 2026-08-27, superseded the same day before any run. Third
+# registered feature, so the family correction is x3.
 ONSET_SHORT_PREREG = "advance onset lead (A first) @4s [25-frame window]"
 
-# Registered 2026-09-06, BEFORE any phrase label exists, from Aaron's account of the
-# hard cases. The feature is "who advanced more". In an ATTACK IN PREPARATION the
-# fencer moving FORWARD is prepping and LOSES priority to the one moving back who
-# lunges into it, so the feature does not merely go quiet on these halts -- its sign
-# is INVERTED. Prediction, one-sided and falsifiable: AUC on attack-in-prep halts is
-# BELOW 0.5, not merely near it. A result of ~0.5 refutes this and means those halts
-# are only uninformative, not adversarial.
-# The other named failure, close-quarters blade sequences, is a PERCEPTION limit and
-# carries no sign prediction: expect ~0.5 there.
+# Registered 2026-09-06, before any phrase label existed.
 PHRASE_PREREG = "attack-in-prep AUC < 0.5 (feature sign inverted)"
 
 ADVISORY = ("checksum cannot run", "checksum seeded from here", "a row is probably missing")
@@ -98,12 +66,7 @@ def auc(scores, pos):
 
 
 def maxstat_p(X, pos, n_perm=20000, seed=0):
-    """Per-feature and family-wise p-values from one label-shuffling null.
-
-    Ranks are invariant to label permutation, so the whole null is a matmul.
-    The family-wise value uses the max |AUC-0.5| across features, which is the
-    statistic the eyeball actually applies when scanning the table.
-    """
+    """Per-feature and family-wise p-values from one label-shuffling null."""
     pos = np.asarray(pos, dtype=bool)
     n, n1 = len(pos), int(pos.sum())
     R = np.stack([ranks(x) for x in X])
@@ -134,14 +97,7 @@ ADV_I = CLASS_NAMES.index("advance")
 
 
 def onset_centroid(d, t, back=4.0, lead=0.3):
-    """Time-centroid of each fencer's advance probability, B minus A.
-
-    Right of way goes to whoever went forward FIRST, so the deciding quantity is
-    ORDER, which a max over a window cannot see -- it only knows who advanced
-    harder. The centroid is threshold-free and needs no tuning: if A's advance
-    mass sits earlier, centroid_A is smaller and this comes out positive.
-    The longest window is used because only it can contain the start.
-    """
+    """Time-centroid of each fencer's advance probability, B minus A."""
     slot, time, probs = d["slot"].astype(str), d["time"], d["probs"]
     out = {}
     for s in ("A", "B"):

@@ -73,9 +73,7 @@ def main() -> int:
     print(f"  {'arm':<12}{'overall':>10}{'fencer A':>11}{'fencer B':>11}"
           f"{'B advance R':>13}")
 
-    # `duplicated` is the control that decides this: same window count, same gradient
-    # steps, same everything -- but the copies are identical instead of mirrored. If
-    # it matches `mirrored`, the gain was optimisation budget, not handedness.
+    # `duplicated` is the matched control: identical copies, not mirrored ones
     for tag in ("baseline", "duplicated", "mirrored"):
         if tag == "mirrored":
             # aggregates are mirror-invariant, so only the pose sequence flips

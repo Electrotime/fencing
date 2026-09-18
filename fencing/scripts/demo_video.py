@@ -353,9 +353,7 @@ def _self_test_parry_gate() -> None:
     _apply_parry_gate(tr)
     assert tr["A"].label == "retreat" and tr["A"].footwork is None, vars(tr["A"])
 
-    # a hard opponent lunge with weak own evidence. The rectangle refused this on
-    # principle; measured, such windows are parries 42% of the time (8-18x base on
-    # every bout), so the line fires and the old invariant is retired.
+    # such windows are parries 42% of the time, so the line fires
     tr = {"A": mk("retreat", probs(retreat=0.7, parry=0.10)),
           "B": mk("lunge", probs(lunge=0.95))}
     _apply_parry_gate(tr)
