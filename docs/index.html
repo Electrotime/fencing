@@ -143,7 +143,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
   <h1>Fence<br>Vision</h1>
   <p class="lede" style="margin-top:26px">Six-class action recognition for foil fencing, from ordinary broadcast video. No sensors, no instrumented equipment, no marked piste.</p>
   <p class="col">Two fencers are located and tracked, 33 pose landmarks are extracted from each, and an LSTM classifies what both are doing twenty times a second. A second pipeline reads the broadcast scoreboard to recover when touches landed and who scored, with no OCR.</p>
-  <p class="col" style="color:var(--muted);font-size:15px">Built on 7 bouts across 4 venues: 51 minutes of hand-labelled footage, 1,365 labelled intervals, plus touch outcomes across 14 video files. Code, labelling and analysis are my own &mdash; I'm a competitive foil fencer, which is where the action and phrase-type labels come from.</p>
+  <p class="col" style="color:var(--muted);font-size:15px">Built on 7 bouts across 4 venues: 51 minutes of hand-labelled footage, 1,365 labelled intervals, plus touch outcomes across 14 video files. Code, labelling and analysis are my own &mdash; I fence foil, which is where the action and phrase-type labels come from.</p>
   <div class="stats">
     <div class="stat"><div class="n">80.2%</div><div class="k">best held-out bout</div></div>
     <div class="stat"><div class="n">73.6%</div><div class="k">mean, 5 held out</div></div>
@@ -210,7 +210,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
   <div class="grid2">
     <div>
       <h3>It survives a venue change</h3>
-      <p>Two bouts were held out at venues the model had never seen &mdash; different hall, lighting, camera, broadcaster &mdash; and scored 73.7% and 69.1%, four to six points below a familiar bout. Roughly a minute of labelled footage from a new venue closes most of that gap, which makes deployment a small known cost rather than a research problem.</p>
+      <p>Two bouts were held out at venues the model had never seen &mdash; different hall, lighting, camera, broadcaster &mdash; and scored 73.7% and 69.1%, which sits inside the spread of the familiar bouts above. The cost only appears on the harder test: hold out <em>two</em> venues from the same training run and they score 66.4% and 70.2%, against 75.5&ndash;80.2% on familiar footage. 35 seconds of labelled footage from the new venue is worth 9 points back, which makes deployment a small known cost rather than a research problem.</p>
     </div>
     <div>
       <h3>Left-handers were a blind spot</h3>
@@ -222,7 +222,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
     </div>
     <div>
       <h3>Parry needed a better shape, not better numbers</h3>
-      <p>Parry is brief, small, and overlaps with footwork &mdash; the raw classifier ran at 29% precision. Replacing two independent thresholds with a single fitted line, letting strong parry evidence trade against a committed attack, took F1 from 0.31 to <strong>0.38</strong> with overall accuracy unchanged. Re-tuning the old thresholds gained nothing, so it was the shape of the rule that mattered.</p>
+      <p>Parry is brief, small, and overlaps with footwork &mdash; the raw classifier ran at 39% precision on a held-out bout, and 29% before mirror augmentation. Replacing two independent thresholds with a single fitted line, letting strong parry evidence trade against a committed attack, took F1 from 0.31 to <strong>0.38</strong> with overall accuracy unchanged. Re-tuning the old thresholds gained nothing, so it was the shape of the rule that mattered.</p>
     </div>
   </div>
 </section>
@@ -288,7 +288,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
       <tr><td>Single-lamp calls made</td><td class="n">56 / 56</td><td>no model needed</td></tr>
     </tbody>
   </table>
-  <p class="col" style="margin-top:20px">Fifty-four percent of touches are single-lamp, where the lamp alone names the scorer. Hand labelling drops to the contested remainder &mdash; 40% of the work.</p>
+  <p class="col" style="margin-top:20px">Most halts light a single lamp, where the lamp alone names the scorer and no model is needed. Hand labelling drops to the contested remainder &mdash; 64 of 159 halts, 40% of the work.</p>
 </section>
 
 <section>
@@ -384,7 +384,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
       <li><span class="v">0.70</span><span class="w">+ bout 10</span></li>
       <li><span class="v">0.69</span><span class="w">+ bouts 11, 12</span></li>
       <li><span class="v">0.64</span><span class="w">+ bouts 13, 14</span></li>
-      <li><span class="v">0.61</span><span class="w">duplicate removed</span></li>
+      <li><span class="v">0.61</span><span class="w">bout 13 was bout 9, removed</span></li>
     </ol>
   </div>
   <p class="col" style="margin-top:18px;font-size:15px;color:var(--muted)">The right-of-way estimate as held-out data arrived. The last step was not new data: two video files turned out to be the same match, and removing the duplicate moved the number again.</p>
@@ -392,7 +392,7 @@ footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--rule);
 
 <footer>
   <p><strong>FenceVision</strong> by Aaron Li. Foil fencing action recognition from broadcast video: pose estimation, scoreboard reading, and a pre-registered test of right-of-way prediction.</p>
-  <p>Source, full results, and the many experiments: <a href="https://github.com/Electrotime/fencing">github.com/Electrotime/fencing</a>.</p>
+  <p>Source, full results, and the experiments that failed: <a href="https://github.com/Electrotime/fencing">github.com/Electrotime/fencing</a>.</p>
   <p style="margin:0">Visualization inspired by <a href="https://rhizomatiks.com/en/work/fencing-tracking-and-visualization-system/" target="_blank" rel="noopener"><em>Fencing Tracking and Visualization System</em></a> (Rhizomatiks &times; Dentsu Lab Tokyo), presented at <a href="https://dl.acm.org/doi/abs/10.1145/3478511.3491310" target="_blank" rel="noopener">SIGGRAPH Asia 2021</a>. Implementation is my own.</p>
 </footer>
 </div>
