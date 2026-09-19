@@ -7,9 +7,9 @@ Held-out accuracy is 80.2% on a bout the model never trained on, against a 34.8%
 
 On the halts where both scoring lamps fire and the referee must award the touch on *right of way*, the model's action probabilities predict that decision at **0.61 AUC** (95% CI [0.50, 0.72], p = 0.026) across 104 halts in eight bouts never used to select it. That clears 0.05 on its own but **not** after correcting for the three registered features (p = 0.077), so it is suggestive rather than established. That average hides the useful part. Split by what kind of action the halt was — labelled by a fencer from video, before seeing any model output — it is **0.84 where one fencer clearly attacks and the other retreats**, and at or below chance on every other kind. The method has a boundary, and it falls where right of way stops being decided by who went forward. A companion pipeline reads the broadcast scoreboard to recover touch times and lamp colours automatically, at 104/104 on four broadcasters.
 
-## See it running
+## Demo page
 
-**[electrotime.github.io/fencing](https://electrotime.github.io/fencing/)** — annotated clips, the full results, and where the method breaks, on one page.
+**[electrotime.github.io/fencing](https://electrotime.github.io/fencing/)** — annotated clips and full results.
 
 To run it on your own footage, see [Installation](#installation) and [Usage](#usage). [Demo video](#demo-video) explains what is on screen and which checkpoint renders it.
 
