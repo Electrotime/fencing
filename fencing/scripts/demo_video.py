@@ -40,8 +40,8 @@ TRAIL_LEN = 30          # ~1 s of tip history
 TRAIL_JUMP = 0.22       # fraction of frame width that breaks the ribbon
 # left red, right green -- the same convention as the lamps and the scoreboard panel
 TRAIL_COLORS = {"A": (48, 48, 255), "B": (64, 235, 64)}
-PULSE_SECONDS = 0.1     # strobe interval for the whole-blade afterimages
-PULSE_KEEP = 8          # how many afterimages stay on screen
+PULSE_SECONDS = 0.05    # strobe interval for the whole-blade afterimages
+PULSE_KEEP = 6          # ~0.3 s of tail; longer smears instead of strobing
 PULSE_MAX_FOREARMS = 5  # a blade is ~3.6 forearms; beyond this the tip is wrong
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
