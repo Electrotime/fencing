@@ -26,7 +26,8 @@ from src.person_detector import crop_box, get_fencer_boxes, load_person_model
 from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
                                _landmarks_to_array, _make_landmarker,
                                _normalize_sequence)
-from src.utils import draw_action_label, draw_blade_tip, draw_blade_trail, draw_skeleton
+from src.utils import (draw_action_label, draw_blade_pulses, draw_blade_tip,
+                       draw_blade_trail, draw_skeleton)
 
 # seven bouts, four venues, mirror-augmented; see README.md, "Results".
 MODEL_PATH = PROJECT_ROOT / "models" / "action_mirror7.pth"
@@ -39,6 +40,9 @@ TRAIL_LEN = 30          # ~1 s of tip history
 TRAIL_JUMP = 0.22       # fraction of frame width that breaks the ribbon
 # left red, right green -- the same convention as the lamps and the scoreboard panel
 TRAIL_COLORS = {"A": (48, 48, 255), "B": (64, 235, 64)}
+PULSE_SECONDS = 0.1     # strobe interval for the whole-blade afterimages
+PULSE_KEEP = 8          # how many afterimages stay on screen
+PULSE_MAX_FOREARMS = 5  # a blade is ~3.6 forearms; beyond this the tip is wrong
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
 
@@ -451,9 +455,11 @@ def main() -> None:
     want_board = "--scoreboard" in sys.argv
     want_calls = "--calls" in sys.argv
     want_trail = "--trail" in sys.argv
+    want_pulses = "--pulses" in sys.argv
     if not argv:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
-                 "[--start S] [--end S] [--scoreboard|--calls] [--trail] [--frame-model | --self-test]")
+                 "[--start S] [--end S] [--scoreboard|--calls] "
+                 "[--trail] [--pulses] [--frame-model | --self-test]")
     video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")
@@ -512,6 +518,8 @@ def main() -> None:
 
     tracks = {"A": FencerTrack(), "B": FencerTrack()}
     trails = {"A": deque(maxlen=TRAIL_LEN), "B": deque(maxlen=TRAIL_LEN)}
+    pulses = {"A": deque(maxlen=PULSE_KEEP), "B": deque(maxlen=PULSE_KEEP)}
+    pulse_every = max(1, int(round(fps * PULSE_SECONDS)))
     prev_gray = None
     pan_windows: dict = {}
 
@@ -604,7 +612,7 @@ def main() -> None:
                     # tracked but not doing a scoring action -> a quiet "ready" tag
                     draw_action_label(frame, f"{slot}: ready", None, org=org, color=(150, 150, 150))
 
-            if blade_model is not None and want_trail:
+            if blade_model is not None and (want_trail or want_pulses):
                 _arm = {}
                 for s_, t_ in tracks.items():
                     opp = 0.0 if s_ == "B" else 1.0
@@ -621,7 +629,7 @@ def main() -> None:
                     wx, wy = t_.prev[wr_, 0] * W, t_.prev[wr_, 1] * H
                     ex, ey = t_.prev[el, 0] * W, t_.prev[el, 1] * H
                     n_ = ((wx - ex) ** 2 + (wy - ey) ** 2) ** 0.5 or 1.0
-                    _arm[s_] = ((wx, wy), ((wx - ex) / n_, (wy - ey) / n_))
+                    _arm[s_] = ((wx, wy), ((wx - ex) / n_, (wy - ey) / n_), n_)
                 _wr = {s_: [a_[0]] for s_, a_ in _arm.items()}
                 seen = set()
                 for bx in get_blade_boxes(frame, blade_model, k=2):
@@ -646,10 +654,21 @@ def main() -> None:
                         px, py = hist[-1]
                         tip = (0.38 * tip[0] + 0.62 * px, 0.38 * tip[1] + 0.62 * py)
                     hist.append(tip)
+                    # the detected box need not reach the hilt, so the blade is
+                    # spanned wrist-to-tip rather than from the fitted near end
+                    if want_pulses and idx % pulse_every == 0:
+                        (wx_, wy_), _, fore = _arm[slot]
+                        span = ((tip[0] - wx_) ** 2 + (tip[1] - wy_) ** 2) ** 0.5
+                        if span <= PULSE_MAX_FOREARMS * fore:
+                            pulses[slot].append(((wx_, wy_), tip))
                 for s_ in trails:
                     if s_ not in seen:
                         trails[s_].clear()
-                draw_blade_trail(frame, trails, TRAIL_COLORS)
+                        pulses[s_].clear()
+                if want_pulses:
+                    draw_blade_pulses(frame, pulses, TRAIL_COLORS)
+                if want_trail:
+                    draw_blade_trail(frame, trails, TRAIL_COLORS)
             elif blade_model is not None:
                 wr = [(t_.prev[w, 0] * W, t_.prev[w, 1] * H)
                       for t_ in tracks.values() for w in (WRIST_L, WRIST_R)

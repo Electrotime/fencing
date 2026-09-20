@@ -74,6 +74,32 @@ def draw_blade_trail(frame, trails, colors, glow=True):
     return frame
 
 
+def draw_blade_pulses(frame, pulses, colors, glow=True):
+    """Strobed afterimages of the whole blade, newest brightest."""
+    glow_m = np.zeros_like(frame)
+    core_m = np.zeros_like(frame)
+    for slot, segs in pulses.items():
+        if not segs:
+            continue
+        base = colors.get(slot, (255, 255, 255))
+        n = len(segs)
+        for i, (a, b) in enumerate(segs):
+            age = (i + 1) / n                      # 0 oldest, 1 newest
+            p = (int(a[0]), int(a[1])); q = (int(b[0]), int(b[1]))
+            cv2.line(glow_m, p, q, tuple(int(c * age ** 1.6) for c in base),
+                     max(2, int(2 + 6 * age)), cv2.LINE_AA)
+            hot = tuple(int(c + (255 - c) * 0.8) for c in base)
+            cv2.line(core_m, p, q, tuple(int(c * age ** 2.4) for c in hot),
+                     max(1, int(1 + 2 * age)), cv2.LINE_AA)
+    if glow:
+        glow_m = cv2.GaussianBlur(glow_m, (0, 0), 7)
+        core_m = cv2.GaussianBlur(core_m, (0, 0), 1)
+    # cv2.add SATURATES; np.add on uint8 wraps, which turned the red trail green
+    cv2.add(frame, glow_m, dst=frame)
+    cv2.add(frame, core_m, dst=frame)
+    return frame
+
+
 def draw_action_label(frame: np.ndarray, action: str, confidence: float | None,
                       org: tuple[int, int] = (10, 40),
                       color: tuple[int, int, int] = (0, 200, 255)) -> np.ndarray:
