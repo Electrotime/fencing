@@ -43,6 +43,9 @@ TRAIL_COLORS = {"A": (48, 48, 255), "B": (64, 235, 64)}
 PULSE_SECONDS = 0.05    # strobe interval for the whole-blade afterimages
 PULSE_KEEP = 6          # ~0.3 s of tail; longer smears instead of strobing
 PULSE_MAX_FOREARMS = 5  # a blade is ~3.6 forearms; beyond this the tip is wrong
+SABER_LEAD = 2.0        # s of lightsaber before a halt
+SABER_HOLD = 0.4        # s it lingers after, so the last blade position reads
+LAB = PROJECT_ROOT / "data" / "labels"
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
 
@@ -423,6 +426,35 @@ def _self_test_assign() -> None:
     print("self-test ok: two-box assignment is memoryless, lone box uses history")
 
 
+def saber_windows(stem, lead=SABER_LEAD, hold=SABER_HOLD):
+    """(start, end) around every halt, from whichever source this bout has."""
+    halts, src = [], "none"
+    try:
+        import exp_contested as C
+        halts = [u for u, _, _ in C.read_contested(stem)]
+        src = "hand table"
+    except Exception:
+        pass
+    if not halts:
+        try:
+            import read_scoreboard as RS
+            t, ser = RS.lamp_series("", RS.LAYOUT[stem]["lamp"], 0.1,
+                                    LAB / f"{stem}_lamp.npz")
+            halts = [h["t"] for h in RS.detect_halts(t, ser, RS.lamp_all_thresholds(ser))]
+            src = "lamp box"
+        except Exception:
+            pass
+    if not halts:
+        try:
+            import find_halts as FH
+            g, a = FH.activity(stem)
+            halts = FH.find(g, a)
+            src = "motion detector"
+        except Exception:
+            pass
+    return [(u - lead, u + hold) for u in halts], src
+
+
 def main() -> None:
     if "--self-test" in sys.argv:
         _self_test_assign()
@@ -455,11 +487,12 @@ def main() -> None:
     want_board = "--scoreboard" in sys.argv
     want_calls = "--calls" in sys.argv
     want_trail = "--trail" in sys.argv
-    want_pulses = "--pulses" in sys.argv
+    want_pulses = "--pulses" in sys.argv or "--lightsaber" in sys.argv
+    saber_only = "--lightsaber" in sys.argv
     if not argv:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
                  "[--start S] [--end S] [--scoreboard|--calls] "
-                 "[--trail] [--pulses] [--frame-model | --self-test]")
+                 "[--trail] [--lightsaber] [--frame-model | --self-test]")
     video = Path(argv[0])
     if not video.exists():
         sys.exit(f"video not found: {video}")
@@ -520,6 +553,12 @@ def main() -> None:
     trails = {"A": deque(maxlen=TRAIL_LEN), "B": deque(maxlen=TRAIL_LEN)}
     pulses = {"A": deque(maxlen=PULSE_KEEP), "B": deque(maxlen=PULSE_KEEP)}
     pulse_every = max(1, int(round(fps * PULSE_SECONDS)))
+    windows = []
+    if saber_only:
+        windows, wsrc = saber_windows(video.stem)
+        print(f"lightsaber: {len(windows)} halt windows on bout {video.stem} ({wsrc})")
+        if not windows:
+            print("  no halt times found -- lightsaber stays on throughout")
     prev_gray = None
     pan_windows: dict = {}
 
@@ -612,6 +651,11 @@ def main() -> None:
                     # tracked but not doing a scoring action -> a quiet "ready" tag
                     draw_action_label(frame, f"{slot}: ready", None, org=org, color=(150, 150, 150))
 
+            now_s = (first + idx) / fps
+            lit = not windows or any(a <= now_s <= b for a, b in windows)
+            if not lit:
+                for d_ in pulses.values():
+                    d_.clear()
             if blade_model is not None and (want_trail or want_pulses):
                 _arm = {}
                 for s_, t_ in tracks.items():
@@ -656,7 +700,7 @@ def main() -> None:
                     hist.append(tip)
                     # the detected box need not reach the hilt, so the blade is
                     # spanned wrist-to-tip rather than from the fitted near end
-                    if want_pulses and idx % pulse_every == 0:
+                    if want_pulses and lit and idx % pulse_every == 0:
                         (wx_, wy_), _, fore = _arm[slot]
                         span = ((tip[0] - wx_) ** 2 + (tip[1] - wy_) ** 2) ** 0.5
                         if span <= PULSE_MAX_FOREARMS * fore:
