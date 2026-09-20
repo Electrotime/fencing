@@ -20,7 +20,7 @@ To run it on your own footage, see [Installation](#installation) and [Usage](#us
 - Opponent-aware classification: each fencer's features include their opponent's
 - A learned two-term decision rule for parry, worth +11 points of recall on held-out bout 4 at unchanged overall accuracy
 - Mirror augmentation for left- and right-handed fencers, worth 7 points against a matched control
-- Annotated video output with per-fencer overlays, blade-tip trails and a scoreboard panel
+- Annotated video output with per-fencer overlays, blade and blade-tip trails and a scoreboard panel
 - Leave-one-bout-out evaluation scripts and per-feature ablation controls
 - Scoreboard and lamp reading with no OCR, recovering halt times, which lamps fired, and the scorer
 - A pre-registered right-of-way test, reported alongside the confirmation attempt that missed and a rival hypothesis of my own that failed
