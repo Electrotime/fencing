@@ -102,13 +102,17 @@ def draw_blade_pulses(frame, pulses, colors, glow=True):
 
 def draw_action_label(frame: np.ndarray, action: str, confidence: float | None,
                       org: tuple[int, int] = (10, 40),
-                      color: tuple[int, int, int] = (0, 200, 255)) -> np.ndarray:
+                      color: tuple[int, int, int] = (0, 200, 255),
+                      scale: float = 1.0) -> np.ndarray:
     """Action name (+ confidence, if given) on a dark box so it reads over any background."""
     text = action if confidence is None else f"{action}  {confidence:.0%}"
-    (tw, th), base = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+    thick = max(1, int(round(2 * scale)))
+    (tw, th), base = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thick)
     x, y = org
-    cv2.rectangle(frame, (x - 6, y - th - 8), (x + tw + 6, y + base + 4), (0, 0, 0), -1)
-    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
+    pad = max(3, int(round(6 * scale)))
+    cv2.rectangle(frame, (x - pad, y - th - pad - 2),
+                  (x + tw + pad, y + base + pad - 2), (0, 0, 0), -1)
+    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick)
     return frame
 
 

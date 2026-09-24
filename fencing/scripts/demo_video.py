@@ -80,6 +80,9 @@ PARRY_PROMOTE_MIN = 0.15      # own parry probability, chosen on bout 5, confirm
 PARRY_PROMOTE_OPP_MIN = 0.60  # opponent lunge -- far above the veto's 0.20, because
 PARRY_LAMP_COLOR = (0, 165, 255)   # amber (BGR)
 PARRY_LAMP_DY = 44                 # pixels below the footwork line
+RUNNERUP_GAP = 0.15                # show the second class when it is this close
+RUNNERUP_DY = 30                   # pixels below the main label
+RUNNERUP_SCALE = 0.62
 
 MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps are
 MIN_BOX_H_FRAC = 0.25 # ignore "people" shorter than this fraction of frame height.
@@ -426,6 +429,23 @@ def _self_test_assign() -> None:
     print("self-test ok: two-box assignment is memoryless, lone box uses history")
 
 
+def _runner_up(track):
+    """(name, prob) of the second-place class when it is within RUNNERUP_GAP.
+
+    Both numbers come from `probs` so the pair is on one scale, even when the
+    headline label was won by the short window instead.
+    """
+    if track.probs is None or track.label is None:
+        return None
+    i = CLASS_NAMES.index(track.label)
+    other = track.probs.copy()
+    other[i] = -1.0
+    j = int(other.argmax())
+    if float(track.probs[i]) - float(other[j]) > RUNNERUP_GAP:
+        return None
+    return CLASS_NAMES[j], float(other[j])
+
+
 def saber_windows(stem, lead=SABER_LEAD, hold=SABER_HOLD):
     """(start, end) around every halt, from whichever source this bout has."""
     halts, src = [], "none"
@@ -647,6 +667,13 @@ def main() -> None:
                 if is_action:
                     draw_action_label(frame, f"{slot}: {track.label}", track.conf,
                                       org=org, color=color)
+                    second = _runner_up(track)
+                    if second is not None:
+                        nm, pv = second
+                        draw_action_label(frame, nm, pv,
+                                          org=(org[0], org[1] + RUNNERUP_DY),
+                                          color=tuple(int(c * 0.65) for c in color),
+                                          scale=RUNNERUP_SCALE)
                 elif box is not None:
                     # tracked but not doing a scoring action -> a quiet "ready" tag
                     draw_action_label(frame, f"{slot}: ready", None, org=org, color=(150, 150, 150))
