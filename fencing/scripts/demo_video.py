@@ -81,8 +81,8 @@ PARRY_PROMOTE_OPP_MIN = 0.60  # opponent lunge -- far above the veto's 0.20, bec
 PARRY_LAMP_COLOR = (0, 165, 255)   # amber (BGR)
 PARRY_LAMP_DY = 44                 # pixels below the footwork line
 RUNNERUP_GAP = 0.15                # show the second class when it is this close
-RUNNERUP_DY = 30                   # pixels below the main label
-RUNNERUP_SCALE = 0.62
+RUNNERUP_DY = 40                   # pixels below the main label
+RUNNERUP_SCALE = 0.8
 
 MAX_FROZEN_FRAC = 0.25  # skip the window if more than this share of joint steps are
 MIN_BOX_H_FRAC = 0.25 # ignore "people" shorter than this fraction of frame height.
@@ -681,7 +681,7 @@ def main() -> None:
                         nm, pv = second
                         draw_action_label(frame, nm, pv,
                                           org=(org[0], org[1] + RUNNERUP_DY),
-                                          color=tuple(int(c * 0.65) for c in color),
+                                          color=tuple(int(c * 0.85) for c in color),
                                           scale=RUNNERUP_SCALE)
                 elif box is not None:
                     # tracked but not doing a scoring action -> a quiet "ready" tag
@@ -689,7 +689,7 @@ def main() -> None:
                     for k, (nm, pv) in enumerate(_quiet_breakdown(track), 1):
                         draw_action_label(frame, nm, pv,
                                           org=(org[0], org[1] + RUNNERUP_DY * k),
-                                          color=(125, 125, 125), scale=RUNNERUP_SCALE)
+                                          color=(150, 150, 150), scale=RUNNERUP_SCALE)
 
             now_s = (first + idx) / fps
             lit = not windows or any(a <= now_s <= b for a, b in windows)

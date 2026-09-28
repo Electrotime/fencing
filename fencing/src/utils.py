@@ -112,7 +112,8 @@ def draw_action_label(frame: np.ndarray, action: str, confidence: float | None,
     pad = max(3, int(round(6 * scale)))
     cv2.rectangle(frame, (x - pad, y - th - pad - 2),
                   (x + tw + pad, y + base + pad - 2), (0, 0, 0), -1)
-    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick)
+    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick,
+                cv2.LINE_AA)
     return frame
 
 
