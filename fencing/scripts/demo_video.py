@@ -429,6 +429,15 @@ def _self_test_assign() -> None:
     print("self-test ok: two-box assignment is memoryless, lone box uses history")
 
 
+def _quiet_breakdown(track):
+    """Neutral/walking under a `ready` tag: the leader, plus the other when close."""
+    if track.probs is None:
+        return []
+    q = sorted(((c, float(track.probs[CLASS_NAMES.index(c)])) for c in QUIET_CLASSES),
+               key=lambda kv: -kv[1])
+    return q if q[0][1] - q[1][1] <= RUNNERUP_GAP else q[:1]
+
+
 def _runner_up(track):
     """(name, prob) of the second-place class when it is within RUNNERUP_GAP.
 
@@ -677,6 +686,10 @@ def main() -> None:
                 elif box is not None:
                     # tracked but not doing a scoring action -> a quiet "ready" tag
                     draw_action_label(frame, f"{slot}: ready", None, org=org, color=(150, 150, 150))
+                    for k, (nm, pv) in enumerate(_quiet_breakdown(track), 1):
+                        draw_action_label(frame, nm, pv,
+                                          org=(org[0], org[1] + RUNNERUP_DY * k),
+                                          color=(125, 125, 125), scale=RUNNERUP_SCALE)
 
             now_s = (first + idx) / fps
             lit = not windows or any(a <= now_s <= b for a, b in windows)
