@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import itertools
 import sys
 from collections import deque
 from contextlib import ExitStack
@@ -49,6 +51,7 @@ LAB = PROJECT_ROOT / "data" / "labels"
 BLADE_WEIGHTS = (PROJECT_ROOT / "models" / "blade_yolo" / "fencing_blade_v2"
                  / "weights" / "best.pt")
 
+TARGET_FPS = 30.0     # the model's windows are counted in frames at this rate
 PREDICT_EVERY = 5     # frames between action predictions (labels hold in between)
 MIN_REAL_FRAMES = 15  # don't guess an action until we've tracked this many frames
 
@@ -98,6 +101,7 @@ class FencerTrack:
         self.kp: deque[np.ndarray] = deque(maxlen=SEQ_LEN)      # (33, 4) frame fractions
         self.motion: deque[tuple[float, float]] = deque(maxlen=SEQ_LEN)  # (pan, hip_x)
         self.prev = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
+        self.seen = np.zeros((N_LANDMARKS, 4), dtype=np.float32)  # last frame with a pose
         self.last_hip_x = 0.5
         self.label: str | None = None
         self.conf = 0.0
@@ -105,6 +109,13 @@ class FencerTrack:
         self.footwork: str | None = None
         self.footwork_conf = 0.0
         self.counts: dict[str, int] = {}  # how often each label got emitted
+
+
+def fps_stride(fps: float) -> int:
+    """Keep every Nth frame so a 60-frame window spans ~2 s whatever the source rate."""
+    if not np.isfinite(fps) or fps <= 0:
+        return 1
+    return max(1, int(round(fps / TARGET_FPS)))
 
 
 def _frame_pan(prev_gray: np.ndarray | None, gray: np.ndarray,
@@ -150,6 +161,38 @@ def _assign_boxes(dets: list[np.ndarray], tracks: dict[str, FencerTrack],
     return slots
 
 
+def track_frame(frame: np.ndarray, boxes: dict[str, np.ndarray | None],
+                tracks: dict[str, FencerTrack], landmarkers: dict, pan: float,
+                timestamp_ms: int) -> dict[str, np.ndarray]:
+    """Pose both slots and append to their tracks; training, scoring and the demo share it."""
+    H, W = frame.shape[:2]
+    out: dict[str, np.ndarray] = {}
+    for slot in ("A", "B"):
+        track, box = tracks[slot], boxes[slot]
+        kp = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
+        crop = crop_box(frame, box)
+        if crop is not None:
+            result = landmarkers[slot].detect_for_video(
+                mp.Image(image_format=mp.ImageFormat.SRGB,
+                         data=cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)), timestamp_ms)
+            kp = _landmarks_to_array(result)
+            # crop coordinates back into full-frame fractions
+            x1, y1, x2, y2 = box
+            kp[:, 0] = (x1 + kp[:, 0] * (x2 - x1)) / W
+            kp[:, 1] = (y1 + kp[:, 1] * (y2 - y1)) / H
+            # occluded joints, or a whole missed pose, carry the last position forward
+            low = kp[:, 3] < VISIBILITY_THRESHOLD
+            kp[low, :3] = track.prev[low, :3]
+            track.prev = kp.copy()
+            track.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)
+            if np.any(kp[:, 3] > 0):
+                track.seen = kp.copy()
+        track.kp.append(kp)
+        track.motion.append((pan, track.last_hip_x))
+        out[slot] = kp
+    return out
+
+
 def _window_inputs(kp_seq: np.ndarray, motion_seq: np.ndarray, min_real: int):
     """(flat, agg, n_real) for one fencer's window, or None if it fails the gates."""
     real = np.any(kp_seq.reshape(len(kp_seq), -1) != 0, axis=1)
@@ -174,7 +217,7 @@ def _window_inputs(kp_seq: np.ndarray, motion_seq: np.ndarray, min_real: int):
 def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarray,
                      min_real: int,
                      opp: tuple | None = None) -> tuple[str | None, float, np.ndarray | None]:
-    """Classify one window of keypoints. Returns (label, confidence) or (None, 0)."""
+    """Classify one window: (label, confidence, probs), or (None, 0.0, None) if gated out."""
     got = _window_inputs(kp_seq, motion_seq, min_real)
     if got is None:
         return None, 0.0, None
@@ -208,7 +251,7 @@ def _classify_window(model: ActionLSTM, kp_seq: np.ndarray, motion_seq: np.ndarr
 
 def _predict(model: ActionLSTM, track: FencerTrack,
              opp_track: FencerTrack | None = None) -> None:
-    """Multi-scale prediction: short window catches fast actions (parry), long"""
+    """Multi-scale prediction: the short window may override the long one on fast actions."""
     kp_full = np.stack(track.kp)
     mot_full = np.array(track.motion, dtype=np.float32)
     if opp_track is not None and len(opp_track.kp) == len(track.kp):
@@ -235,6 +278,9 @@ def _predict(model: ActionLSTM, track: FencerTrack,
         track.label, track.conf = short_label, short_conf
     elif long_label is not None:
         track.label, track.conf = long_label, long_conf
+    else:
+        # no usable window: clear the call rather than leave the last one on screen
+        track.label, track.conf = None, 0.0
     if track.label is not None:
         track.counts[track.label] = track.counts.get(track.label, 0) + 1
 
@@ -429,6 +475,28 @@ def _self_test_assign() -> None:
     print("self-test ok: two-box assignment is memoryless, lone box uses history")
 
 
+def _self_test_stream() -> None:
+    """Frame-rate decimation, argument parsing, and no stale label once a track is lost."""
+    assert [fps_stride(f) for f in (29.97, 30.0, 25.0, 50.0, 59.94, 60.0, 120.0)] \
+        == [1, 1, 1, 2, 2, 2, 4]
+    assert fps_stride(0.0) == 1 and fps_stride(float("nan")) == 1
+
+    # option VALUES must never be mistaken for the output path
+    a = _parse_args(["bout.mp4", "--start", "300", "--end", "320"])
+    assert a.out is None and (a.start, a.end) == (300.0, 320.0), a
+    a = _parse_args(["bout.mp4", "out.mp4", "--start=5", "--model", "verify_m7_h6.pth"])
+    assert a.out == Path("out.mp4") and a.start == 5.0 and a.model == "verify_m7_h6.pth", a
+
+    lost = FencerTrack()
+    lost.label, lost.conf = "lunge", 0.9
+    for _ in range(SEQ_LEN):
+        lost.kp.append(np.zeros((N_LANDMARKS, 4), dtype=np.float32))
+        lost.motion.append((0.0, 0.5))
+    _predict(None, lost)
+    assert lost.label is None and lost.conf == 0.0 and not lost.counts, vars(lost)
+    print("self-test ok: fps stride, argument parsing, lost track clears its label")
+
+
 def _quiet_breakdown(track):
     """Neutral/walking under a `ready` tag: the leader, plus the other when close."""
     if track.probs is None:
@@ -439,11 +507,7 @@ def _quiet_breakdown(track):
 
 
 def _runner_up(track):
-    """(name, prob) of the second-place class when it is within RUNNERUP_GAP.
-
-    Both numbers come from `probs` so the pair is on one scale, even when the
-    headline label was won by the short window instead.
-    """
+    """(name, prob) of the second-place class when it is within RUNNERUP_GAP, else None."""
     if track.probs is None or track.label is None:
         return None
     i = CLASS_NAMES.index(track.label)
@@ -484,48 +548,47 @@ def saber_windows(stem, lead=SABER_LEAD, hold=SABER_HOLD):
     return [(u - lead, u + hold) for u in halts], src
 
 
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(
+        description="Annotate a fencing video with poses, action labels and blade trails.")
+    ap.add_argument("video", type=Path, nargs="?")
+    ap.add_argument("out", type=Path, nargs="?", help="default: <video>_demo.mp4")
+    ap.add_argument("--start", type=float, help="segment start, seconds")
+    ap.add_argument("--end", type=float, help="segment end, seconds")
+    ap.add_argument("--model", help="checkpoint path, or a file name under models/")
+    ap.add_argument("--frame-model", action="store_true", help="use the per-frame model")
+    ap.add_argument("--scoreboard", action="store_true",
+                    help="lamp and right-of-way panel (bouts with a lamp box)")
+    ap.add_argument("--calls", action="store_true",
+                    help="right-of-way panel from the hand table, no lamps")
+    ap.add_argument("--trail", action="store_true", help="blade-tip trails")
+    ap.add_argument("--pulses", action="store_true", help="strobed blade afterimages")
+    ap.add_argument("--lightsaber", action="store_true",
+                    help="afterimages only in the seconds before each halt")
+    ap.add_argument("--no-fps-normalise", action="store_true",
+                    help="feed the model every frame, even above 30 fps")
+    ap.add_argument("--self-test", action="store_true")
+    return ap.parse_args(argv)
+
+
 def main() -> None:
-    if "--self-test" in sys.argv:
+    a = _parse_args()
+    if a.self_test:
         _self_test_assign()
         _self_test_parry_gate()
+        _self_test_stream()
         return
-    def _opt(name, default=None):
-        for i, a in enumerate(sys.argv):
-            if a == name and i + 1 < len(sys.argv):
-                return float(sys.argv[i + 1])
-            if a.startswith(f"{name}="):
-                return float(a.split("=", 1)[1])
-        return default
-
-    def _opt_str(name):
-        for i, a in enumerate(sys.argv):
-            if a == name and i + 1 < len(sys.argv):
-                return sys.argv[i + 1]
-            if a.startswith(f"{name}="):
-                return a.split("=", 1)[1]
-        return None
-
-    start_s, end_s = _opt("--start"), _opt("--end")
-    model_arg = _opt_str("--model")
-    _skip = {str(v) for v in (start_s, end_s) if v is not None}
-    if model_arg:
-        _skip.add(model_arg)
-    argv = [a for a in sys.argv[1:]
-            if a != "--frame-model" and not a.startswith("--") and a not in _skip]
-    use_frame = "--frame-model" in sys.argv
-    want_board = "--scoreboard" in sys.argv
-    want_calls = "--calls" in sys.argv
-    want_trail = "--trail" in sys.argv
-    want_pulses = "--pulses" in sys.argv or "--lightsaber" in sys.argv
-    saber_only = "--lightsaber" in sys.argv
-    if not argv:
+    if a.video is None:
         sys.exit("usage: python scripts/demo_video.py path/to/video.mp4 [out.mp4] "
-                 "[--start S] [--end S] [--scoreboard|--calls] "
-                 "[--trail] [--lightsaber] [--frame-model | --self-test]")
-    video = Path(argv[0])
+                 "(--help lists the options)")
+    start_s, end_s, model_arg = a.start, a.end, a.model
+    use_frame, want_board, want_calls = a.frame_model, a.scoreboard, a.calls
+    want_trail, saber_only = a.trail, a.lightsaber
+    want_pulses = a.pulses or a.lightsaber
+    video = a.video
     if not video.exists():
         sys.exit(f"video not found: {video}")
-    out_path = Path(argv[1]) if len(argv) > 1 else video.with_name(f"{video.stem}_demo.mp4")
+    out_path = a.out or video.with_name(f"{video.stem}_demo.mp4")
 
     print("loading models...")
     person_model = load_person_model()
@@ -569,17 +632,26 @@ def main() -> None:
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     first = int(round((start_s or 0.0) * fps))
     last = int(round(end_s * fps)) if end_s is not None else total
-    last = min(last, total)
+    if total > 0:
+        last = min(last, total)
     if first:
         cap.set(cv2.CAP_PROP_POS_FRAMES, first)
-    n_frames = max(0, last - first)
-    if start_s is not None or end_s is not None:
+    # some containers report no frame count; then read until the stream ends
+    n_frames = max(0, last - first) if (total > 0 or end_s is not None) else None
+    if n_frames is not None and (start_s is not None or end_s is not None):
         print(f"segment {first / fps:.1f}s -> {last / fps:.1f}s "
               f"({n_frames} frames, {n_frames / fps:.1f}s)")
+    stride = 1 if a.no_fps_normalise else fps_stride(fps)
+    if stride > 1:
+        print(f"fps-normalise: {fps:.1f} fps, the model sees every {stride} frames "
+              f"-> window spans {WINDOW_LONG * stride / fps:.2f}s")
     writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (W, H))
+    if not writer.isOpened():
+        sys.exit(f"couldn't open {out_path} for writing (use a .mp4 output path)")
 
     tracks = {"A": FencerTrack(), "B": FencerTrack()}
-    trails = {"A": deque(maxlen=TRAIL_LEN), "B": deque(maxlen=TRAIL_LEN)}
+    trail_len = TRAIL_LEN * stride     # TRAIL_LEN is in model frames, the trail in output ones
+    trails = {"A": deque(maxlen=trail_len), "B": deque(maxlen=trail_len)}
     pulses = {"A": deque(maxlen=PULSE_KEEP), "B": deque(maxlen=PULSE_KEEP)}
     pulse_every = max(1, int(round(fps * PULSE_SECONDS)))
     windows = []
@@ -596,54 +668,40 @@ def main() -> None:
             slot: stack.enter_context(_make_landmarker(mp.tasks.vision.RunningMode.VIDEO))
             for slot in tracks
         }
-        for idx in tqdm(range(n_frames), desc=video.stem[:40], unit="frame"):
+        boxes: dict[str, np.ndarray | None] = {"A": None, "B": None}
+        drawn = {s: np.zeros((N_LANDMARKS, 4), dtype=np.float32) for s in tracks}
+        kept = 0
+        frames = range(n_frames) if n_frames is not None else itertools.count()
+        for idx in tqdm(frames, total=n_frames, desc=video.stem[:40], unit="frame"):
             ok, frame = cap.read()
             if not ok:
                 break
 
-            gray = cv2.cvtColor(cv2.resize(frame, (320, 180)), cv2.COLOR_BGR2GRAY).astype(np.float32)
-            pan = _frame_pan(prev_gray, gray, pan_windows)
-            prev_gray = gray
+            # above 30 fps the model sees every `stride`-th frame; boxes, skeletons
+            # and labels hold on the frames in between
+            if idx % stride == 0:
+                gray = cv2.cvtColor(cv2.resize(frame, (320, 180)),
+                                    cv2.COLOR_BGR2GRAY).astype(np.float32)
+                pan = _frame_pan(prev_gray, gray, pan_windows)
+                prev_gray = gray
 
-            box_a, box_b = get_fencer_boxes(frame, person_model, min_h_frac=MIN_BOX_H_FRAC)
-            boxes = _assign_boxes([b for b in (box_a, box_b) if b is not None], tracks, W)
-            timestamp = int(idx * 1000 / fps)
+                box_a, box_b = get_fencer_boxes(frame, person_model,
+                                                min_h_frac=MIN_BOX_H_FRAC)
+                boxes = _assign_boxes([b for b in (box_a, box_b) if b is not None],
+                                      tracks, W)
+                drawn = track_frame(frame, boxes, tracks, landmarkers, pan,
+                                    int(idx * 1000 / fps))
 
-            drawn: dict[str, np.ndarray] = {}
-            for slot, box in (("A", boxes["A"]), ("B", boxes["B"])):
-                track = tracks[slot]
-                kp = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
-                crop = crop_box(frame, box)
-                if crop is not None:
-                    rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                    result = landmarkers[slot].detect_for_video(
-                        
-                        mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp)
-                    kp = _landmarks_to_array(result)
-                    if np.any(kp):
-                        # map crop coordinates back into full-frame fractions
-                        x1, y1, x2, y2 = box
-                        kp[:, 0] = (x1 + kp[:, 0] * (x2 - x1)) / W
-                        kp[:, 1] = (y1 + kp[:, 1] * (y2 - y1)) / H
-                        # carry occluded joints forward, same as training
-                        low = kp[:, 3] < VISIBILITY_THRESHOLD
-
-                        kp[low, :3] = track.prev[low, :3]
-                        track.prev = kp.copy()
-                        track.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)
-                
-                track.kp.append(kp)
-                track.motion.append((pan, track.last_hip_x))
-                drawn[slot] = kp
-
-            if idx % PREDICT_EVERY == 0:
-                for slot in ("A", "B"):
-                    track = tracks[slot]
-                    if len(track.kp) >= MIN_REAL_FRAMES:
-                        _predict(action_model, track, tracks["B" if slot == "A" else "A"])
-                # both fencers now hold a distribution for THIS frame, which is what
-                # the parry gate needs -- it asks whether the other one is attacking
-                _apply_parry_gate(tracks)
+                if kept % PREDICT_EVERY == 0:
+                    for slot in ("A", "B"):
+                        track = tracks[slot]
+                        if len(track.kp) >= MIN_REAL_FRAMES:
+                            _predict(action_model, track,
+                                     tracks["B" if slot == "A" else "A"])
+                    # both fencers now hold a distribution for THIS frame, which is what
+                    # the parry gate needs -- it asks whether the other one is attacking
+                    _apply_parry_gate(tracks)
+                kept += 1
 
             for slot, box in (("A", boxes["A"]), ("B", boxes["B"])):
                 track = tracks[slot]
@@ -653,7 +711,7 @@ def main() -> None:
                 if box is not None:
                     x1, y1, x2, y2 = box.astype(int)
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
-                if np.any(kp):
+                if np.any(kp[:, 3] > 0):     # a pose was found, not carried forward
                     pts = np.stack([kp[:, 0] * W, kp[:, 1] * H], axis=1)
                     draw_skeleton(frame, pts)
                 org = (10, 40) if slot == "A" else (W - 360, 40)
@@ -702,16 +760,16 @@ def main() -> None:
                     opp = 0.0 if s_ == "B" else 1.0
                     best = None
                     for el, wr_ in ((ELBOW_L, WRIST_L), (ELBOW_R, WRIST_R)):
-                        if min(t_.prev[el, 3], t_.prev[wr_, 3]) < VISIBILITY_THRESHOLD:
+                        if min(t_.seen[el, 3], t_.seen[wr_, 3]) < VISIBILITY_THRESHOLD:
                             continue
-                        d_ = abs(t_.prev[wr_, 0] - opp)
+                        d_ = abs(t_.seen[wr_, 0] - opp)
                         if best is None or d_ < best[0]:
                             best = (d_, el, wr_)
                     if best is None:
                         continue
                     _, el, wr_ = best
-                    wx, wy = t_.prev[wr_, 0] * W, t_.prev[wr_, 1] * H
-                    ex, ey = t_.prev[el, 0] * W, t_.prev[el, 1] * H
+                    wx, wy = t_.seen[wr_, 0] * W, t_.seen[wr_, 1] * H
+                    ex, ey = t_.seen[el, 0] * W, t_.seen[el, 1] * H
                     n_ = ((wx - ex) ** 2 + (wy - ey) ** 2) ** 0.5 or 1.0
                     _arm[s_] = ((wx, wy), ((wx - ex) / n_, (wy - ey) / n_), n_)
                 _wr = {s_: [a_[0]] for s_, a_ in _arm.items()}
@@ -754,9 +812,9 @@ def main() -> None:
                 if want_trail:
                     draw_blade_trail(frame, trails, TRAIL_COLORS)
             elif blade_model is not None:
-                wr = [(t_.prev[w, 0] * W, t_.prev[w, 1] * H)
+                wr = [(t_.seen[w, 0] * W, t_.seen[w, 1] * H)
                       for t_ in tracks.values() for w in (WRIST_L, WRIST_R)
-                      if t_.prev[w, 3] >= VISIBILITY_THRESHOLD]
+                      if t_.seen[w, 3] >= VISIBILITY_THRESHOLD]
                 draw_blade_tip(frame, blade_tip_from_box(
                     get_blade_box(frame, blade_model), wr))
 

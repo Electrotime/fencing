@@ -34,7 +34,7 @@ cd fencing/fencing
 pip install -r requirements.txt
 ```
 
-Python 3.9+ is required. The shipped checkpoint is `models/action_mirror7.pth`. Every path
+Python 3.10+ is required. The shipped checkpoint is `models/action_mirror7.pth`. Every path
 below is relative to the inner `fencing/` directory, which is where the package, scripts
 and data live.
 
@@ -65,7 +65,15 @@ Produce a per-bout statistics report:
 python scripts/bout_stats.py --bouts 4,5,6,7
 ```
 
-Most scripts accept `--self-test`, which runs their built-in assertions without touching any video.
+Analyse footage that has no labels at all. The first command caches the model's probabilities; the other two read halts and an event timeline off that cache:
+
+```bash
+python scripts/evaluate_labels.py data/raw_video/15.mp4 --tag _mirror
+python scripts/find_halts.py --bouts 15
+python scripts/bout_timeline.py data/labels/15_probs_mirror.npz --plot timeline.png
+```
+
+Most scripts accept `--self-test`, which runs their built-in assertions without touching any video. `python scripts/run_self_tests.py` runs all of them.
 
 ## How it works
 
@@ -325,7 +333,7 @@ One caveat is printed inline by the tool rather than left in the numbers: the co
 
 ### A note on frame rate
 
-The window is 60 frames, so 60 fps footage would give it half the intended duration. `evaluate_labels.py` decimates to ~30 fps by default; `--no-fps-normalise` restores the old behaviour for reproducing earlier runs. Running 60 fps input without it costs about 5.6 points of accuracy and 8 points of parry recall, with nothing to warn you — the corpus contains a hand-made `7_30fps.mp4` from before the flag existed, for exactly this reason.
+The window is 60 frames, so 60 fps footage would give it half the intended duration. `evaluate_labels.py`, `demo_video.py` and `extract_continuous.py` all feed the model every second frame of 60 fps input by default (the demo still writes every frame); `--no-fps-normalise` restores the old behaviour for reproducing earlier runs. Running 60 fps input without it costs about 5.6 points of accuracy and 8 points of parry recall, with nothing to warn you — the corpus contains a hand-made `7_30fps.mp4` from before the flag existed, for exactly this reason.
 
 ## Evaluation protocol
 
@@ -406,7 +414,8 @@ fencing/
                (right-of-way tests), exp_pooled.py (pooled confirmation),
                scoreboard_overlay.py (demo panel: lamps, referee, model),
                bout_stats.py (per-bout report),
-               venue_motion.py, bout_timeline.py
+               venue_motion.py, bout_timeline.py (event timeline, --plot),
+               run_self_tests.py (every built-in check)
   data/        raw_video/, labels/ (interval CSVs), train_continuous/ (cached windows)
   models/      action_mirror7.pth (shipped checkpoint)
 ```

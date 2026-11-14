@@ -28,8 +28,18 @@ HAND_BOUTS = ("8", "9", "10", "11", "12", "14")  # 13 is the same bout as 9
 
 def activity(stem, dt=DT):
     """Fencing-class mass, both fencers, on a grid. Walking counts as quiet."""
-    d = np.load(LAB / f"{stem}_probs_mirror.npz", allow_pickle=True)
-    t, p, slot = np.asarray(d["time"]), np.asarray(d["probs"]), np.asarray(d["slot"])
+    cache = LAB / f"{stem}_probs_mirror.npz"
+    if not cache.exists():
+        raise SystemExit(f"no probability cache at {cache}. Generate one with:\n"
+                         f"  python scripts/evaluate_labels.py data/raw_video/{stem}.mp4 "
+                         f"--tag _mirror")
+    d = np.load(cache, allow_pickle=True)
+    return activity_of(np.asarray(d["time"]), np.asarray(d["probs"]),
+                       np.asarray(d["slot"]), dt)
+
+
+def activity_of(t, p, slot, dt=DT):
+    """The same signal from arrays already in memory, for any probability cache."""
     fence = [CLASS_NAMES.index(c) for c in ("advance", "lunge", "parry", "retreat")]
     grid = np.arange(0.0, float(t.max()) + dt, dt)
     per = []
@@ -43,7 +53,7 @@ def activity(stem, dt=DT):
 
 
 def score(grid, a, before=BEFORE, after=AFTER):
-    """Step-down matched filter: how busy the 4 s before, how quiet the 5 s after."""
+    """Step-down matched filter: how busy the `before` seconds, how quiet the `after`."""
     dt = float(grid[1] - grid[0])
     nb, na = int(round(before / dt)), int(round(after / dt))
     c = np.concatenate([[0.0], np.cumsum(a)])
@@ -74,6 +84,8 @@ def find(grid, a, before=BEFORE, after=AFTER, pct=PCT, gap=GAP):
 
 def chance(grid, pred, true, real, n=1000, seed=0, gap=GAP, tol=TOL):
     """Recall of the same number of detections scattered at random."""
+    if not true:
+        return float("nan"), float("nan")
     rng = np.random.default_rng(seed)
     out = []
     for _ in range(n):
@@ -90,11 +102,15 @@ def chance(grid, pred, true, real, n=1000, seed=0, gap=GAP, tol=TOL):
 
 
 def truth(stem):
-    """Halt times: lamp onsets where a lamp box exists, hand table otherwise."""
-    if stem in HAND_BOUTS:
-        import exp_contested as C
-        return [r[0] for r in C.read_contested(stem)], False
+    """Halt times: hand table, else lamp onsets, else none (a bout nobody has labelled)."""
+    import exp_contested as C
     import read_scoreboard as RS
+    hand = (LAB / f"bout{stem}_contested.tsv").exists()
+    lamp = "lamp" in RS.LAYOUT.get(stem, {}) and (LAB / f"{stem}_lamp.npz").exists()
+    if stem in HAND_BOUTS or (hand and not lamp):
+        return [r[0] for r in C.read_contested(stem)], False
+    if not lamp:
+        return [], False
     t, ser = RS.lamp_series("", RS.LAYOUT[stem]["lamp"], 0.1, LAB / f"{stem}_lamp.npz")
     thr = RS.lamp_all_thresholds(ser)
     return [h["t"] for h in RS.detect_halts(t, ser, thr)], True
@@ -153,6 +169,8 @@ def main() -> int:
                     help="random-placement draws for the chance baseline; 0 skips")
     ap.add_argument("--worklist", metavar="STEM",
                     help="write a halt-by-halt labelling skeleton for one bout")
+    ap.add_argument("--force", action="store_true",
+                    help="let --worklist overwrite an existing sheet")
     a = ap.parse_args()
 
     if a.self_test:
@@ -161,12 +179,16 @@ def main() -> int:
     if a.worklist:
         r = report(a.worklist, sims=0)
         known = {}
-        if a.worklist in HAND_BOUTS:
+        if (LAB / f"bout{a.worklist}_contested.tsv").exists():
             import exp_contested as C
             _, pairs = match(r["pred"], [u for u, _, _ in C.read_contested(a.worklist)])
             call = {u: p for u, p, _ in C.read_contested(a.worklist)}
             known = {v: call[u] for u, v in pairs}
         out = LAB / f"bout{a.worklist}_halts_EMPTY.tsv"
+        if out.exists() and not a.force:
+            print(f"{out} already exists and may hold your labels; "
+                  f"pass --force to overwrite it")
+            return 1
         lines = ["# EVERY halt the motion detector found in "
                  f"data/raw_video/{a.worklist}.mp4 -- single-light ones included.",
                  "# Rows already in bout{}_contested.tsv come pre-filled; the blanks are"
@@ -192,10 +214,17 @@ def main() -> int:
         r = report(stem, a.sims)
         rows.append(r)
         p = "    --" if np.isnan(r["precision"]) else f"{r['precision']:6.0%}"
+        if not r["n_true"]:
+            print(f"{stem:<6}{r['minutes']:7.1f}{'--':>7}{r['n_pred']:7d}"
+                  f"{'--':>6}{'--':>9}{'--':>8}{'--':>7}{p}  no halt labels yet")
+            print("      at " + ", ".join(f"{int(u) // 60}:{int(u) % 60:02d}"
+                                           for u in r["pred"]))
+            continue
         print(f"{stem:<6}{r['minutes']:7.1f}{r['n_true']:7d}{r['n_pred']:7d}"
               f"{r['hits']:6d}{r['recall']:9.0%}{r['chance']:8.0%}"
               f"{r['p']:7.3f}{p}  "
               f"{'lamp (tuning)' if r['exhaustive'] else 'hand table (held out)'}")
+    rows = [r for r in rows if r["n_true"]]
     for tag, sel in (("tuning  ", [r for r in rows if r["exhaustive"]]),
                      ("held out", [r for r in rows if not r["exhaustive"]])):
         if sel:

@@ -56,7 +56,7 @@ def clip_dataset_arrays():
 
 
 def train_once(train_ds, weights, epochs, seed, device, pool="mean"):
-    """pool defaults to "mean" to keep older callers byte-identical; the"""
+    """One training run; pool defaults to "mean" so older callers stay byte-identical."""
     torch.manual_seed(seed)
     model = ActionLSTM(pool=pool).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)

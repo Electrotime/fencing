@@ -17,6 +17,12 @@ from src.labels import (labelled_spans, load_intervals, overlap, unlabelled_gaps
 
 FILLER_GAP = 15.0
 
+PLOT_ROW_MIN = 4.0                                   # minutes of bout per chart row
+PLOT_CLASSES = ("lunge", "parry", "advance", "retreat")
+# lamp convention, left red / right green; 14+ OKLab dE under colour-blind simulation
+PLOT_COLORS = {"A": "#b3261e", "B": "#27a455"}
+PLOT_SURFACE, PLOT_INK, PLOT_MUTED, PLOT_GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e5e4e0"
+
 QUIET_CLASSES = {"neutral", "walking"}
 SLOT_NAME = {"A": "left", "B": "right"}
 # Aggression proxy: forward intent vs yielding ground. Not a claim about who is
@@ -141,6 +147,57 @@ def gate(events: list[Event], min_dur: float, min_conf: float) -> list[Event]:
     return [e for e in events if e.dur >= min_dur and e.conf >= min_conf]
 
 
+def plot_timeline(events: list[Event], halts: list[float], t0: float, t1: float,
+                  out: Path, title: str) -> None:
+    """One band per action, the left fencer above the right, wrapped every PLOT_ROW_MIN."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+    from matplotlib.ticker import FuncFormatter, MultipleLocator
+
+    row_s = PLOT_ROW_MIN * 60.0
+    n_rows = max(1, int(np.ceil((t1 - t0) / row_s)))
+    fig, axes = plt.subplots(n_rows, 1, figsize=(13, 1.9 * n_rows + 1.3), squeeze=False,
+                             facecolor=PLOT_SURFACE)
+    for r, ax in enumerate(axes[:, 0]):
+        lo = t0 + r * row_s
+        ax.set_facecolor(PLOT_SURFACE)
+        for band, cls in enumerate(PLOT_CLASSES):
+            for k, slot in enumerate(("A", "B")):
+                bars = [(e.start, e.dur) for e in events
+                        if e.slot == slot and e.label == cls and e.end > lo
+                        and e.start < lo + row_s]
+                y = len(PLOT_CLASSES) - 1 - band + (0.08 if k == 0 else -0.36)
+                ax.broken_barh(bars, (y, 0.28), color=PLOT_COLORS[slot], linewidth=0)
+        for h in halts:
+            if lo <= h < lo + row_s:
+                ax.axvline(h, color=PLOT_INK, linewidth=0.8, alpha=0.35, zorder=0)
+        ax.set_xlim(lo, lo + row_s)
+        ax.set_ylim(-0.55, len(PLOT_CLASSES) - 0.45)
+        ax.set_yticks(range(len(PLOT_CLASSES)))
+        ax.set_yticklabels(PLOT_CLASSES[::-1], color=PLOT_INK, fontsize=9)
+        ax.xaxis.set_major_locator(MultipleLocator(30))
+        ax.xaxis.set_major_formatter(
+            FuncFormatter(lambda v, _: f"{int(v) // 60}:{int(v) % 60:02d}"))
+        ax.tick_params(colors=PLOT_MUTED, labelsize=8, length=0)
+        ax.grid(axis="y", color=PLOT_GRID, linewidth=0.8)
+        ax.set_axisbelow(True)
+        for side in ax.spines.values():
+            side.set_visible(False)
+    handles = [Patch(color=PLOT_COLORS["A"], label="left fencer"),
+               Patch(color=PLOT_COLORS["B"], label="right fencer")]
+    if halts:
+        handles.append(plt.Line2D([], [], color=PLOT_INK, alpha=0.35, linewidth=0.8,
+                                  label="halt (motion detector)"))
+    fig.legend(handles=handles, loc="upper right", ncol=len(handles), frameon=False,
+               fontsize=9, labelcolor=PLOT_INK)
+    fig.suptitle(title, x=0.01, ha="left", color=PLOT_INK, fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(out, dpi=140, facecolor=PLOT_SURFACE)
+    plt.close(fig)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cache", type=Path)
@@ -152,6 +209,8 @@ def main() -> int:
                     help="seconds of probability smoothing before segmenting (0=off)")
     ap.add_argument("--sweep", action="store_true")
     ap.add_argument("--csv", type=Path)
+    ap.add_argument("--plot", type=Path, metavar="PNG",
+                    help="draw the gated events and motion-detected halts as a chart")
     ap.add_argument("--quiet-events", action="store_true")
     ap.add_argument("--top", type=int, default=40)
     a = ap.parse_args()
@@ -281,6 +340,15 @@ def main() -> int:
                             f"{ev.dur:.2f}", ev.label, f"{ev.conf:.3f}",
                             f"{ev.peak:.3f}", ev.n])
         print(f"\nwrote {len(kept)} events to {a.csv}")
+
+    if a.plot:
+        sys.path.insert(0, str(PROJECT / "scripts"))
+        import find_halts as FH
+        halts = FH.find(*FH.activity_of(times, probs, slots))
+        plot_timeline(kept, halts, float(times.min()), float(times.max()), a.plot,
+                      f"{a.cache.stem}: model-called actions, {len(kept)} events, "
+                      f"{len(halts)} halts")
+        print(f"\nwrote the timeline chart to {a.plot}")
     return 0
 
 

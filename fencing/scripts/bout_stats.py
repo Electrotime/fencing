@@ -80,6 +80,9 @@ def show(stem):
         print(f"bout {stem}: no touch table, skipped")
         return None
     _, rows = CT.check(src)
+    if not rows:
+        print(f"bout {stem}: touch table has no usable rows, skipped")
+        return None
     p = phrase_stats(rows)
     print()
     print(f"=== BOUT {stem} -- {p['span_min']:.1f} min ===")
@@ -139,11 +142,12 @@ def main() -> int:
     every = [show(s) for s in a.bouts.split(",")]
     got = [p for p in every if p]
     if len(got) > 1:
-        g = np.concatenate([p["gaps"] for p in got if len(p["gaps"])])
+        g = np.concatenate([p["gaps"] for p in got] + [np.array([])])
         h, s = sum(p["halts"] for p in got), sum(p["scoring"] for p in got)
+        tempo = (f", median phrase {np.median(g):.1f}s, {(g < 15).mean():.0%} under 15s"
+                 if len(g) else "")
         print(f"\n=== ALL {len(got)} BOUTS ===")
-        print(f"  {h} halts, {s} scoring ({s / h:.0%}), median phrase {np.median(g):.1f}s, "
-              f"{(g < 15).mean():.0%} under 15s")
+        print(f"  {h} halts, {s} scoring ({s / h:.0%}){tempo}")
         S, O = Counter(), Counter()
         for s in a.bouts.split(","):
             src = LAB / f"bout{s}_touches.tsv"

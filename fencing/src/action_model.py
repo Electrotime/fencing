@@ -42,7 +42,7 @@ def _knee_angle(hip: np.ndarray, knee: np.ndarray, ankle: np.ndarray) -> np.ndar
 
 
 def _first_mover(kp: np.ndarray, nose_dir: float) -> float:
-    """NOT WIRED IN -- kept as a documented dead end. See the warning at the end."""
+    """NOT WIRED IN -- kept as a documented dead end; it keys on clip-start alignment."""
     if len(kp) < 6:
         return 0.0
     ax = kp[:, ANKLE_LEFT, 0] * nose_dir
@@ -83,7 +83,7 @@ def wide_agg(own: np.ndarray, opponent: np.ndarray | None) -> np.ndarray:
 
 
 def _engineered_features(kp: np.ndarray, motion: np.ndarray) -> np.ndarray:
-    """Seven clip-level numbers that decide the classes the raw sequence can't."""
+    """Six clip-level numbers that decide the classes the raw sequence can't."""
     n = len(kp)
     if n < 2:
         return np.zeros(N_AGG_FEATURES, dtype=np.float32)
@@ -225,7 +225,7 @@ class ActionLSTM(nn.Module):
     POOL_MODES = ("mean", "max", "last")
 
     def __init__(self, pool: str = "mean", n_agg: int = N_AGG_FEATURES) -> None:
-        """`pool` selects the time reduction. DEFAULTS TO "mean" for a reason:"""
+        """`pool` picks the time reduction; "mean" stays the default for old checkpoints."""
         super().__init__()
         if pool not in self.POOL_MODES:
             raise ValueError(f"pool must be one of {self.POOL_MODES}, got {pool!r}")

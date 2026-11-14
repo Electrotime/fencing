@@ -1,7 +1,7 @@
 """Extract TRAINING windows from continuous footage + interval labels."""
-import csv
+import argparse
 import sys
-from collections import Counter, defaultdict, deque
+from collections import Counter, deque
 from pathlib import Path
 
 import cv2
@@ -14,30 +14,12 @@ import mediapipe as mp
 
 import demo_video as D
 from src.action_model import CLASS_NAMES
-from src.person_detector import crop_box, get_fencer_boxes, load_person_model
-from src.pose_pipeline import (N_LANDMARKS, VISIBILITY_THRESHOLD,
-                               _landmarks_to_array, _make_landmarker)
+from src.labels import load_intervals
+from src.person_detector import get_fencer_boxes, load_person_model
+from src.pose_pipeline import _make_landmarker
 
 OUTDIR = PROJECT / "data" / "train_continuous"
-SLOT_OF = {"left": "A", "right": "B"}
 PAN_WIDE_FRAC = 0.44      # the wider aperture benchmarked in pan_benchmark.py
-
-
-def load_truth(path):
-    """Interval labels -> slot -> [(start, end, label)], two-track collapsed."""
-    truth = defaultdict(list)
-    with open(path, encoding="utf-8") as f:
-        rdr = csv.DictReader(r for r in f if not r.startswith("#"))
-        two = "footwork" in (rdr.fieldnames or [])
-        for r in rdr:
-            if two:
-                b = r["blade"].strip()
-                lab = b if b in CLASS_NAMES else r["footwork"].strip()
-            else:
-                lab = r["label"].strip()
-            truth[SLOT_OF[r["fencer"]]].append(
-                (float(r["start"]), float(r["end"]), lab))
-    return truth
 
 
 def window_tensors(track, mot_alt=None):
@@ -67,26 +49,37 @@ def window_tensors(track, mot_alt=None):
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
-        print(__doc__)
-        return 2
-    video, labels = Path(sys.argv[1]), Path(sys.argv[2])
-    OUTDIR.mkdir(parents=True, exist_ok=True)
-    out = OUTDIR / f"{video.stem}.npz"
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("video", type=Path)
+    ap.add_argument("labels", type=Path)
+    ap.add_argument("--out", type=Path,
+                    help="default data/train_continuous/<video stem>.npz")
+    ap.add_argument("--no-fps-normalise", action="store_true",
+                    help="keep every frame, even above 30 fps")
+    a = ap.parse_args()
+    video = a.video
+    out = a.out or OUTDIR / f"{video.stem}.npz"
+    out.parent.mkdir(parents=True, exist_ok=True)
 
-    truth = load_truth(labels)
+    truth, _ = load_intervals(a.labels)
 
     def truth_at(slot, t):
-        for s, e, lab in truth[slot]:
+        for s, e, lab in truth.get(slot, ()):
             if s <= t < e:
                 return lab
         return None
 
     person_model = load_person_model()
     cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        print(f"couldn't open {video}")
+        return 1
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # the window is 60 FRAMES; above 30 fps keep every Nth so it still spans 2 s
+    stride = 1 if a.no_fps_normalise else D.fps_stride(fps)
+    if stride > 1:
+        print(f"fps-normalise: {fps:.1f} fps, keeping every {stride} frames")
 
     tracks = {s: D.FencerTrack() for s in ("A", "B")}
     lms = {s: _make_landmarker(mp.tasks.vision.RunningMode.VIDEO).__enter__()
@@ -95,12 +88,15 @@ def main() -> int:
     X, AG, LN, Y, TM, SL, AGW = [], [], [], [], [], [], []
     wide_motion = {s: deque(maxlen=D.SEQ_LEN) for s in ("A", "B")}
     PAN_TRACK = []
-    idx, skipped = 0, 0
+    idx, raw_idx, skipped = 0, -1, 0
 
     while True:
         ok, frame = cap.read()
         if not ok:
             break
+        raw_idx += 1
+        if raw_idx % stride:
+            continue
         gray = cv2.cvtColor(cv2.resize(frame, (320, 180)),
                             cv2.COLOR_BGR2GRAY).astype(np.float32)
         pan = D._frame_pan(prev_gray, gray, pan_windows)
@@ -108,35 +104,16 @@ def main() -> int:
         prev_gray = gray
         PAN_TRACK.append((pan, pan_wide))
 
-        # identical to demo_video's loop -- if this drifts, training optimises for
-        # inputs that never occur at inference
+        # the demo's own detection and tracking step, so training sees what inference does
         box_a, box_b = get_fencer_boxes(frame, person_model, min_h_frac=D.MIN_BOX_H_FRAC)
         boxes = D._assign_boxes([b for b in (box_a, box_b) if b is not None], tracks, W)
 
-        for slot, box in (("A", boxes["A"]), ("B", boxes["B"])):
-            t = tracks[slot]
-            kp = np.zeros((N_LANDMARKS, 4), dtype=np.float32)
-            if box is not None:
-                crop = crop_box(frame, box)
-                if crop is not None:
-                    res = lms[slot].detect_for_video(
-                        mp.Image(image_format=mp.ImageFormat.SRGB,
-                                 data=cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)),
-                        int(idx * 1000 / fps))
-                    kp = _landmarks_to_array(res)
-                    x1, y1, x2, y2 = box
-                    kp[:, 0] = (x1 + kp[:, 0] * (x2 - x1)) / W
-                    kp[:, 1] = (y1 + kp[:, 1] * (y2 - y1)) / H
-                    low = kp[:, 3] < VISIBILITY_THRESHOLD
-                    kp[low, :3] = t.prev[low, :3]
-                    t.prev = kp.copy()
-                    t.last_hip_x = float((kp[23, 0] + kp[24, 0]) / 2)
-            t.kp.append(kp)
-            t.motion.append((pan, t.last_hip_x))
-            wide_motion[slot].append((pan_wide, t.last_hip_x))
+        D.track_frame(frame, boxes, tracks, lms, pan, int(raw_idx * 1000 / fps))
+        for slot in ("A", "B"):
+            wide_motion[slot].append((pan_wide, tracks[slot].last_hip_x))
 
         if idx % D.PREDICT_EVERY == 0 and idx >= D.WINDOW_LONG:
-            now = idx / fps
+            now = raw_idx / fps
             for slot in ("A", "B"):
                 lab = truth_at(slot, now)
                 if lab is None or lab not in CLASS_NAMES:

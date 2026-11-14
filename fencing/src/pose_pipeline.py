@@ -80,9 +80,8 @@ def _landmarks_to_array(result: mp.tasks.vision.PoseLandmarkerResult) -> np.ndar
 
 
 def _normalize(kp: np.ndarray) -> np.ndarray:
-    """Center the keypoints on the hips and scale by torso length, so it doesn't"""
+    """Center one frame's keypoints on the hips and scale by torso length."""
     kp = kp.copy()
-    head_center = (kp)
     hip_mid = (kp[HIP_LEFT, :2] + kp[HIP_RIGHT, :2]) / 2.0
     shoulder_mid = (kp[SHOULDER_LEFT, :2] + kp[SHOULDER_RIGHT, :2]) / 2.0
     torso_len = float(np.linalg.norm(shoulder_mid - hip_mid))
@@ -93,7 +92,7 @@ def _normalize(kp: np.ndarray) -> np.ndarray:
 
 
 def _median3(xy: np.ndarray) -> np.ndarray:
-    """3-frame median filter on (n, 33, 2) coordinates. Kills the single-frame"""
+    """3-frame median filter on (n, 33, 2) coordinates; kills single-frame spikes."""
     if len(xy) < 3:
         return xy
     out = xy.copy()
@@ -210,7 +209,7 @@ def extract_keypoints_and_pan_from_video(video_path: str | Path) -> tuple[np.nda
 
 
 def extract_keypoints_from_video(video_path: str | Path) -> np.ndarray:
-    """Whole video -> (n, 33, 4) cleaned keypoints. Same as the function above,"""
+    """Whole video -> (n, 33, 4) cleaned keypoints, without the motion track."""
     return extract_keypoints_and_pan_from_video(video_path)[0]
 
 

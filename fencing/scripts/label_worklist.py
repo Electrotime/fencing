@@ -46,9 +46,15 @@ def main() -> int:
     ap.add_argument("--out")
     ap.add_argument("--template", action="store_true",
                     help="blank sheet, for a bout with no calibrated lamp box yet")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite a sheet that already exists")
     a = ap.parse_args()
 
     out = Path(a.out) if a.out else LAB / f"bout{a.bout}_contested.tsv"
+    if out.exists() and not a.force:
+        print(f"{out} already exists and may hold your labels; "
+              f"pass --force to overwrite it")
+        return 1
     calibrated = a.bout in RS.LAYOUT and "lamp" in RS.LAYOUT[a.bout]
 
     if a.template or not calibrated:

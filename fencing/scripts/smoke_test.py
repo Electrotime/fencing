@@ -1,4 +1,4 @@
-"""Import every library the project needs and print versions, so I know the"""
+"""Import every library the project needs and print its version."""
 
 import importlib
 import sys

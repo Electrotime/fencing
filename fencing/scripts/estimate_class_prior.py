@@ -1,17 +1,17 @@
 """Fix `lunge` over-prediction by correcting the class prior. Honestly split."""
 import csv
 import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-PROJECT = Path(r"c:\Users\aaron\OneDrive\Documents\GitHub\fencing\fencing")
+PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 from src.action_model import CLASS_NAMES
 
 LABELS = PROJECT / "data" / "labels" / "bout1_intervals.csv"
-CACHE = PROJECT / "data" / "labels" / "bout1_probs.npz"
+CACHE = PROJECT / "data" / "labels" / "1_probs.npz"
 SLOT_OF = {"left": "A", "right": "B"}
 K = len(CLASS_NAMES)
 

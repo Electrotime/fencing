@@ -1,8 +1,7 @@
 """Transcribe Aaron's bout 4 table -> two-track CSV. Anomalies FLAGGED, not fixed."""
-import sys
 from pathlib import Path
 
-PROJECT = Path(r"c:\Users\aaron\OneDrive\Documents\GitHub\fencing\fencing")
+PROJECT = Path(__file__).resolve().parent.parent
 OUT = PROJECT / "data" / "labels" / "bout4_intervals_2track.csv"
 
 FIXED = {"20.53.520": "20:53.520", "22:118.967": "22:18.967"}
